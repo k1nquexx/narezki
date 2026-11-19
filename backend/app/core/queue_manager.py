@@ -228,10 +228,17 @@ class QueueManager:
             ).all()
             job_ids = [r[0] for r in rows]
 
+        tasks_to_wait = [
+            t
+            for jid in job_ids
+            if (t := self._active_tasks.get(jid)) is not None and not t.done()
+        ]
         cancelled_count = 0
         for jid in job_ids:
             if await self.cancel_job(jid) is not None:
                 cancelled_count += 1
+        if tasks_to_wait:
+            await asyncio.wait(tasks_to_wait, timeout=10.0)
         return cancelled_count
 
     async def cancel_project_jobs(self, project_id: str) -> int:

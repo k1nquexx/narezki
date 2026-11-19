@@ -242,7 +242,8 @@
 
 ---
 
-### [BUG-20] `MINOR` — Прочие проблемы UI, обработки ошибок, файловой системы и тулинга
+### [BUG-20] [FIXED] `MINOR` — Прочие проблемы UI, обработки ошибок, файловой системы и тулинга
+- **Статус:** `[FIXED]` — настроен ESLint (`eslint.config.js`, `npm run lint`), добавлен `try/catch` с error-тостами в `ClipStudioPage.tsx` и `PresetsPage.tsx`, добавлены опция `"base"` и `isTauriRuntime()`-гарды в `SettingsPage.tsx`, форматирование `err.errors` при 422 в `api.ts`, ожидание отменённых задач в `queue_manager.py` и `asyncio.to_thread(shutil.rmtree, ...)` в `projects.py` (подтверждено `npm run lint`, `tsc --noEmit`, `npm run build` и `test_bug20_delete_project_waits_for_job_and_removes_dir`).
 - **Файлы и строки:**
   - `package.json`: отсутствует ESLint.
   - `src/pages/ClipStudioPage.tsx:154-190`, `src/pages/PresetsPage.tsx:383, 560, 660`: вызовы `api.deleteClip`, `api.updateClip`, `api.trackClip`, `api.renderPreview`, `api.exportClip`, `api.deleteAdPreset`, `api.deleteSubtitlePreset`, `api.deleteBackground` не обёрнуты в `try/catch` — ошибки уходят в unhandled promise rejection без уведомления пользователя.

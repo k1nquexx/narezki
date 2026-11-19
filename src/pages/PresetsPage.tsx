@@ -181,6 +181,19 @@ export function PresetsPage() {
     }
   };
 
+  const handleDeleteWithToast = async (title: string, action: () => Promise<unknown>) => {
+    try {
+      await action();
+      await refreshPresets();
+    } catch (err) {
+      addToast({
+        type: "error",
+        title,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-5">
       <div className="flex items-center justify-between">
@@ -380,7 +393,11 @@ export function PresetsPage() {
                     <div className="text-[10px] text-zinc-500 truncate">{a.asset_path}</div>
                   </div>
                   <button
-                    onClick={() => void api.deleteAdPreset(a.id).then(refreshPresets)}
+                    onClick={() =>
+                      void handleDeleteWithToast("Ошибка удаления рекламы", () =>
+                        api.deleteAdPreset(a.id)
+                      )
+                    }
                     className="text-zinc-500 hover:text-rose-400"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -557,7 +574,11 @@ export function PresetsPage() {
                 </div>
                 {!p.is_default && (
                   <button
-                    onClick={() => void api.deleteSubtitlePreset(p.id).then(refreshPresets)}
+                    onClick={() =>
+                      void handleDeleteWithToast("Ошибка удаления стиля субтитров", () =>
+                        api.deleteSubtitlePreset(p.id)
+                      )
+                    }
                     className="text-zinc-500 hover:text-rose-400"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -657,7 +678,11 @@ export function PresetsPage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => void api.deleteBackground(b.id).then(refreshPresets)}
+                    onClick={() =>
+                      void handleDeleteWithToast("Ошибка удаления фона", () =>
+                        api.deleteBackground(b.id)
+                      )
+                    }
                     className="text-zinc-500 hover:text-rose-400"
                   >
                     <Trash2 className="w-3.5 h-3.5" />

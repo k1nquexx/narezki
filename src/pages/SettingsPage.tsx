@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Cpu, FolderOpen, KeyRound, Loader2, Save, Sparkles } from "lucide-react";
 import { api } from "../lib/api";
-import { pickDirectory, pickWeightsFile } from "../lib/tauri";
+import { isTauriRuntime, pickDirectory, pickWeightsFile } from "../lib/tauri";
 import { useAppStore } from "../store/useAppStore";
 import type { AppSettings, LLMTestResult } from "../types/api";
 
@@ -231,6 +231,7 @@ export function SettingsPage() {
                   <option value="large-v3-turbo">large-v3-turbo (рекомендуется)</option>
                   <option value="medium">medium</option>
                   <option value="small">small</option>
+                  <option value="base">base (быстрая)</option>
                   <option value="large-v3">large-v3</option>
                 </select>
               </label>
@@ -320,12 +321,14 @@ export function SettingsPage() {
                     onChange={(e) => setForm({ ...form, yolo_model_path: e.target.value })}
                     className="flex-1 px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-zinc-100"
                   />
-                  <button
-                    onClick={handlePickWeights}
-                    className="px-3 py-2 rounded-lg bg-surface-800 hover:bg-surface-700 border border-surface-700 text-zinc-200"
-                  >
-                    <FolderOpen className="w-4 h-4" />
-                  </button>
+                  {isTauriRuntime() && (
+                    <button
+                      onClick={handlePickWeights}
+                      className="px-3 py-2 rounded-lg bg-surface-800 hover:bg-surface-700 border border-surface-700 text-zinc-200"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </label>
 
@@ -337,12 +340,14 @@ export function SettingsPage() {
                     onChange={(e) => setForm({ ...form, export_dir: e.target.value })}
                     className="flex-1 px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-zinc-100"
                   />
-                  <button
-                    onClick={handlePickExportDir}
-                    className="px-3 py-2 rounded-lg bg-surface-800 hover:bg-surface-700 border border-surface-700 text-zinc-200"
-                  >
-                    <FolderOpen className="w-4 h-4" />
-                  </button>
+                  {isTauriRuntime() && (
+                    <button
+                      onClick={handlePickExportDir}
+                      className="px-3 py-2 rounded-lg bg-surface-800 hover:bg-surface-700 border border-surface-700 text-zinc-200"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </label>
             </div>

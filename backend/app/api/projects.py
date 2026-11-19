@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
 from pathlib import Path
 from typing import Any, Optional
@@ -142,7 +143,7 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)) ->
 
     proj_dir = (PROJECTS_DIR / project_id).resolve()
     if proj_dir.exists() and PROJECTS_DIR.resolve() in proj_dir.parents:
-        shutil.rmtree(proj_dir, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, proj_dir, True)
     return {"ok": True}
 
 

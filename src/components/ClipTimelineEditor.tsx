@@ -12,9 +12,10 @@ interface Props {
 export function ClipTimelineEditor({ project, clip, adPreset, onChangeRange }: Props) {
   const duration = Math.max(1.0, project.duration || clip.end_time);
   const scenes = project.analysis_json?.scenes ?? [];
-  const rmsDb = project.analysis_json?.audio_peaks?.rms_db ?? [];
+  const rawRmsDb = project.analysis_json?.audio_peaks?.rms_db;
 
   const sparkBars = useMemo(() => {
+    const rmsDb = rawRmsDb ?? [];
     if (rmsDb.length === 0) return [];
     const bucketCount = 90;
     const step = Math.max(1, Math.floor(rmsDb.length / bucketCount));
@@ -27,7 +28,7 @@ export function ClipTimelineEditor({ project, clip, adPreset, onChangeRange }: P
       bars.push(norm);
     }
     return bars;
-  }, [rmsDb]);
+  }, [rawRmsDb]);
 
   const startPct = (clip.start_time / duration) * 100;
   const endPct = (clip.end_time / duration) * 100;

@@ -40,8 +40,21 @@ class ApiClient {
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {
-        const err = (await res.json()) as { detail?: string };
-        if (err.detail) detail = err.detail;
+        const err = (await res.json()) as {
+          detail?: string;
+          errors?: Array<{ loc?: Array<string | number>; msg?: string }>;
+        };
+        if (err.errors && err.errors.length > 0) {
+          const items = err.errors
+            .map((e) => {
+              const field = e.loc?.filter((p) => p !== "body").join(".") || "input";
+              return `${field}: ${e.msg || "invalid"}`;
+            })
+            .join("; ");
+          detail = err.detail ? `${err.detail}: ${items}` : items;
+        } else if (err.detail) {
+          detail = err.detail;
+        }
       } catch {
         const txt = await res.text().catch(() => "");
         if (txt) detail = txt;

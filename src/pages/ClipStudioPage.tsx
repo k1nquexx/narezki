@@ -182,44 +182,84 @@ export function ClipStudioPage() {
 
   const handleDeleteClip = async (clipId: string) => {
     if (!project) return;
-    await api.deleteClip(clipId);
-    await refreshClips(project.id);
+    try {
+      await api.deleteClip(clipId);
+      await refreshClips(project.id);
+    } catch (err) {
+      addToast({
+        type: "error",
+        title: "Ошибка удаления клипа",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const handleToggleSelectExport = async (c: Clip) => {
     const nextSelected = !c.selected_for_export;
-    await api.updateClip(c.id, { selected_for_export: nextSelected });
-    setDraft((prev) =>
-      prev && prev.id === c.id ? { ...prev, selected_for_export: nextSelected } : prev
-    );
-    if (project) await refreshClips(project.id);
+    try {
+      await api.updateClip(c.id, { selected_for_export: nextSelected });
+      setDraft((prev) =>
+        prev && prev.id === c.id ? { ...prev, selected_for_export: nextSelected } : prev
+      );
+      if (project) await refreshClips(project.id);
+    } catch (err) {
+      addToast({
+        type: "error",
+        title: "Ошибка обновления выбора экспорта",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const handleTrackClip = async () => {
     if (!draft) return;
     const saved = await saveDraft();
     if (!saved) return;
-    await api.trackClip(saved.id);
-    await refreshJobs();
-    addToast({ type: "info", title: "YOLOv8 трекинг поставлен в очередь" });
+    try {
+      await api.trackClip(saved.id);
+      await refreshJobs();
+      addToast({ type: "info", title: "YOLOv8 трекинг поставлен в очередь" });
+    } catch (err) {
+      addToast({
+        type: "error",
+        title: "Ошибка запуска трекинга",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const handleRenderPreview = async () => {
     if (!draft) return;
     const saved = await saveDraft();
     if (!saved) return;
-    await api.renderPreview(saved.id);
-    await refreshJobs();
-    addToast({ type: "info", title: "Рендер превью 9:16 запущен" });
+    try {
+      await api.renderPreview(saved.id);
+      await refreshJobs();
+      addToast({ type: "info", title: "Рендер превью 9:16 запущен" });
+    } catch (err) {
+      addToast({
+        type: "error",
+        title: "Ошибка запуска рендера превью",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const handleExportSingle = async () => {
     if (!draft) return;
     const saved = await saveDraft();
     if (!saved) return;
-    await api.exportClip(saved.id);
-    await refreshJobs();
-    addToast({ type: "info", title: "Экспорт клипа (.mp4 + .txt) поставлен в очередь" });
+    try {
+      await api.exportClip(saved.id);
+      await refreshJobs();
+      addToast({ type: "info", title: "Экспорт клипа (.mp4 + .txt) поставлен в очередь" });
+    } catch (err) {
+      addToast({
+        type: "error",
+        title: "Ошибка запуска экспорта",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const handleBatchExport = async () => {

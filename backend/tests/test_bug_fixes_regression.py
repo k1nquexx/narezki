@@ -828,6 +828,31 @@ async def test_bug18_batch_export_non_overwriting_and_partial_isolation(
     await api_client.delete(f"/api/projects/{proj_id}")
 
 
+@pytest.mark.asyncio
+async def test_bug20_delete_project_waits_for_job_and_removes_dir(
+    api_client, fixtures_dir: Path
+) -> None:
+    sample = fixtures_dir / "sample_1080p.mp4"
+    imp = await api_client.post(
+        "/api/projects/import-local",
+        json={"file_path": str(sample), "title": "Bug20 Delete Project"},
+    )
+    assert imp.status_code == 200
+    proj_id = imp.json()["project"]["id"]
+    proj_dir = cfg.PROJECTS_DIR / proj_id
+    assert proj_dir.exists()
+
+    # Delete immediately while ingest job is queued/running; must cancel, wait, and remove folder
+    del_resp = await api_client.delete(f"/api/projects/{proj_id}")
+    assert del_resp.status_code == 200
+    assert del_resp.json()["ok"] is True
+    assert not proj_dir.exists()
+
+    get_resp = await api_client.get(f"/api/projects/{proj_id}")
+    assert get_resp.status_code == 404
+
+
+
 
 
 

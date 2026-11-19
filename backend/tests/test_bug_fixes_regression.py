@@ -726,6 +726,109 @@ async def test_bug17_dynamic_render_semaphore_concurrency() -> None:
     assert sem.limit == 3
 
 
+@pytest.mark.asyncio
+async def test_bug18_batch_export_non_overwriting_and_partial_isolation(
+    api_client, fixtures_dir: Path, monkeypatch, tmp_path: Path
+) -> None:
+    sample = fixtures_dir / "sample_1080p.mp4"
+    imp = await api_client.post(
+        "/api/projects/import-local",
+        json={"file_path": str(sample), "title": "Bug18 Batch"},
+    )
+    assert imp.status_code == 200
+    proj_id = imp.json()["project"]["id"]
+    from tests.test_m1_m2_ingest import _wait_job
+
+    await _wait_job(api_client, imp.json()["job"]["id"])
+
+    c1 = (
+        await api_client.post(
+            "/api/clips",
+            json={
+                "project_id": proj_id,
+                "title": "Batch C1",
+                "start_time": 0.0,
+                "end_time": 2.0,
+                "crop_mode": "cinema_blur",
+            },
+        )
+    ).json()["id"]
+    c2 = (
+        await api_client.post(
+            "/api/clips",
+            json={
+                "project_id": proj_id,
+                "title": "Batch C2",
+                "start_time": 2.0,
+                "end_time": 4.0,
+                "crop_mode": "cinema_blur",
+            },
+        )
+    ).json()["id"]
+    c3 = (
+        await api_client.post(
+            "/api/clips",
+            json={
+                "project_id": proj_id,
+                "title": "Batch C3",
+                "start_time": 4.0,
+                "end_time": 6.0,
+                "crop_mode": "cinema_blur",
+            },
+        )
+    ).json()["id"]
+
+    batch_out = tmp_path / "batch_out"
+    existing_dir = batch_out / "Bug18 Batch"
+    existing_dir.mkdir(parents=True, exist_ok=True)
+    existing_clip_01 = existing_dir / "clip_01.mp4"
+    existing_clip_01.write_bytes(b"do-not-overwrite")
+
+    active_renders = 0
+    max_concurrent_renders = 0
+
+    async def fake_render_clip(**kwargs):
+        nonlocal active_renders, max_concurrent_renders
+        active_renders += 1
+        max_concurrent_renders = max(max_concurrent_renders, active_renders)
+        await asyncio.sleep(0.35)
+        out_path: Path = kwargs["output_path"]
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"rendered-mp4")
+        active_renders -= 1
+        return out_path
+
+    monkeypatch.setattr(render_handlers, "render_clip", fake_render_clip)
+
+    from app.core.queue_manager import _DynamicSemaphore
+
+    ctx = JobContext(
+        job_id="job-bug18-batch",
+        job_type="export_batch",
+        project_id=proj_id,
+        clip_id=None,
+        payload={"clip_ids": [c1, "missing_clip_id", c2, c3], "output_dir": str(batch_out)},
+        cancel_event=asyncio.Event(),
+        gpu_semaphore=asyncio.Semaphore(1),
+        render_semaphore=_DynamicSemaphore(2),
+    )
+
+    res = await render_handlers.handle_export_batch(ctx)
+    assert len(res["exported"]) == 3
+    assert len(res["failed"]) == 1
+    assert res["failed"][0]["clip_id"] == "missing_clip_id"
+
+    # Existing clip_01.mp4 must stay untouched; c1 exported with unique name
+    assert existing_clip_01.read_bytes() == b"do-not-overwrite"
+    c1_out = Path(res["exported"][0]["output_path"])
+    assert c1_out.exists()
+    assert c1_out.name == f"clip_01_{c1[:6]}.mp4"
+    assert max_concurrent_renders == 2
+
+    await api_client.delete(f"/api/projects/{proj_id}")
+
+
+
 
 
 

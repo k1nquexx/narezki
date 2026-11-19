@@ -416,6 +416,26 @@ async def handle_export_clip(ctx: JobContext) -> dict[str, Any]:
     return res
 
 
+def _next_batch_output_path(
+    batch_dir: Path, idx: int, clip_id: str, reserved: set[Path]
+) -> Path:
+    base = batch_dir / f"clip_{idx + 1:02d}.mp4"
+    if not base.exists() and base not in reserved:
+        reserved.add(base)
+        return base
+    candidate = batch_dir / f"clip_{idx + 1:02d}_{clip_id[:6]}.mp4"
+    if not candidate.exists() and candidate not in reserved:
+        reserved.add(candidate)
+        return candidate
+    suffix = 2
+    while True:
+        alt = batch_dir / f"clip_{idx + 1:02d}_{clip_id[:6]}_{suffix}.mp4"
+        if not alt.exists() and alt not in reserved:
+            reserved.add(alt)
+            return alt
+        suffix += 1
+
+
 async def handle_export_batch(ctx: JobContext) -> dict[str, Any]:
     project_id = ctx.project_id
     clip_ids: list[str] = list(ctx.payload.get("clip_ids") or [])
@@ -433,29 +453,55 @@ async def handle_export_batch(ctx: JobContext) -> dict[str, Any]:
     batch_dir = base_dir / proj_slug
     batch_dir.mkdir(parents=True, exist_ok=True)
 
-    exported_files: list[dict[str, Any]] = []
     total = len(clip_ids)
     span = 100.0 / total
+    reserved_paths: set[Path] = set()
+    targets = [
+        (idx, cid, _next_batch_output_path(batch_dir, idx, cid, reserved_paths))
+        for idx, cid in enumerate(clip_ids)
+    ]
 
-    for idx, cid in enumerate(clip_ids):
+    async def _export_one(idx: int, cid: str, out_mp4: Path) -> tuple[bool, dict[str, Any]]:
         ctx.check_cancelled()
-        out_mp4 = batch_dir / f"clip_{idx + 1:02d}.mp4"
         await ctx.log(f"Батч-экспорт [{idx + 1}/{total}] -> {out_mp4.name}")
-        res = await _render_or_export_single(
-            ctx,
-            cid,
-            is_export=True,
-            explicit_output=out_mp4,
-            progress_offset=idx * span,
-            progress_span=span,
-        )
-        exported_files.append(res)
+        try:
+            res = await _render_or_export_single(
+                ctx,
+                cid,
+                is_export=True,
+                explicit_output=out_mp4,
+                progress_offset=idx * span,
+                progress_span=span,
+            )
+            return True, res
+        except (JobCancelledError, asyncio.CancelledError):
+            raise
+        except Exception as exc:
+            err_msg = str(exc) or exc.__class__.__name__
+            await ctx.log(
+                f"Ошибка батч-экспорта клипа {cid} ({out_mp4.name}): {err_msg}",
+                level="error",
+            )
+            return False, {"clip_id": cid, "output_path": str(out_mp4), "error": err_msg}
 
-    await ctx.log(f"Батч-экспорт завершён ({total} клипов) в папку: {batch_dir}")
+    results = await asyncio.gather(*(_export_one(idx, cid, out_mp4) for idx, cid, out_mp4 in targets))
+    exported_files = [item for ok, item in results if ok]
+    failed_clips = [item for ok, item in results if not ok]
+
+    if not exported_files and failed_clips:
+        raise RuntimeError(
+            f"Батч-экспорт завершился ошибкой для всех клипов: {failed_clips[0]['error']}"
+        )
+
+    await ctx.log(
+        f"Батч-экспорт завершён: успешно {len(exported_files)}/{total}, "
+        f"ошибок {len(failed_clips)} -> {batch_dir}"
+    )
     return {
         "project_id": project_id,
         "export_dir": str(batch_dir),
         "exported": exported_files,
+        "failed": failed_clips,
     }
 
 

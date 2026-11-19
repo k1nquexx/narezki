@@ -52,6 +52,7 @@ export function ClipStudioPage() {
 
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("crop");
   const [draft, setDraft] = useState<Clip | null>(null);
+  const [tagsInput, setTagsInput] = useState<string>("");
   const loadedClipIdRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [resyncing, setResyncing] = useState(false);
@@ -70,11 +71,13 @@ export function ClipStudioPage() {
     if (!currentClip) {
       loadedClipIdRef.current = null;
       setDraft(null);
+      setTagsInput("");
       return;
     }
     if (currentClip.id !== loadedClipIdRef.current) {
       loadedClipIdRef.current = currentClip.id;
       setDraft(structuredClone(currentClip));
+      setTagsInput((currentClip.tags_json ?? []).join(" "));
       return;
     }
     setDraft((prev) =>
@@ -138,6 +141,7 @@ export function ClipStudioPage() {
       });
       if (!override || updated.id === loadedClipIdRef.current) {
         setDraft(structuredClone(updated));
+        setTagsInput((updated.tags_json ?? []).join(" "));
       }
       await refreshClips(target.project_id);
       return updated;
@@ -987,12 +991,17 @@ export function ClipStudioPage() {
                     <label className="block space-y-1">
                       <span className="text-zinc-400">Хэштеги (через пробел)</span>
                       <input
-                        value={draft.tags_json.join(" ")}
-                        onChange={(e) =>
+                        value={tagsInput}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setTagsInput(raw);
                           setDraft({
                             ...draft,
-                            tags_json: e.target.value.split(/\s+/).filter(Boolean),
-                          })
+                            tags_json: raw.split(/\s+/).filter(Boolean),
+                          });
+                        }}
+                        onBlur={() =>
+                          setTagsInput(tagsInput.split(/\s+/).filter(Boolean).join(" "))
                         }
                         className="w-full px-2.5 py-1.5 rounded bg-surface-950 border border-surface-700 text-zinc-100"
                       />

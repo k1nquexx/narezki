@@ -26,6 +26,57 @@ class JobCancelledError(Exception):
     """Raised when an active job is cancelled by the user."""
 
 
+class _DynamicSemaphore:
+    """Async semaphore whose concurrency limit can be updated in place without replacing the instance."""
+
+    def __init__(self, limit: int = 2) -> None:
+        self._limit = max(1, int(limit))
+        self._active = 0
+        self._waiters: list[asyncio.Future[None]] = []
+
+    @property
+    def limit(self) -> int:
+        return self._limit
+
+    def _wake_waiters(self) -> None:
+        while self._active < self._limit and self._waiters:
+            fut = self._waiters.pop(0)
+            if not fut.done():
+                self._active += 1
+                fut.set_result(None)
+
+    def set_limit(self, limit: int) -> None:
+        self._limit = max(1, int(limit))
+        self._wake_waiters()
+
+    async def acquire(self) -> None:
+        while self._active >= self._limit:
+            fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+            self._waiters.append(fut)
+            try:
+                await fut
+                return
+            except asyncio.CancelledError:
+                if fut in self._waiters:
+                    self._waiters.remove(fut)
+                if fut.done() and not fut.cancelled():
+                    self.release()
+                raise
+        self._active += 1
+
+    def release(self) -> None:
+        if self._active > 0:
+            self._active -= 1
+        self._wake_waiters()
+
+    async def __aenter__(self) -> "_DynamicSemaphore":
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> None:
+        self.release()
+
+
 @dataclass
 class JobContext:
     job_id: str
@@ -35,7 +86,7 @@ class JobContext:
     payload: dict[str, Any]
     cancel_event: asyncio.Event
     gpu_semaphore: asyncio.Semaphore
-    render_semaphore: asyncio.Semaphore
+    render_semaphore: asyncio.Semaphore | _DynamicSemaphore
     _subprocesses: set[asyncio.subprocess.Process] = field(default_factory=set)
 
     def check_cancelled(self) -> None:
@@ -101,7 +152,7 @@ class QueueManager:
         self._contexts: dict[str, JobContext] = {}
         self._gpu_semaphore = asyncio.Semaphore(1)
         self._render_limit: int = 2
-        self._render_semaphore = asyncio.Semaphore(self._render_limit)
+        self._render_semaphore = _DynamicSemaphore(self._render_limit)
         self._started = False
 
     def register_handler(self, job_type: str, handler: JobHandler) -> None:
@@ -114,7 +165,7 @@ class QueueManager:
         async with AsyncSessionLocal() as session:
             settings = await load_settings(session)
             self._render_limit = max(1, min(4, settings.max_render_workers))
-            self._render_semaphore = asyncio.Semaphore(self._render_limit)
+            self._render_semaphore.set_limit(self._render_limit)
 
             # Mark stale running jobs from an unexpected shutdown as failed
             running_rows = (
@@ -163,7 +214,7 @@ class QueueManager:
         clamped = max(1, min(4, int(limit)))
         if clamped != self._render_limit:
             self._render_limit = clamped
-            self._render_semaphore = asyncio.Semaphore(clamped)
+            self._render_semaphore.set_limit(clamped)
 
     async def _cancel_jobs_where(self, *conditions: Any) -> int:
         async with AsyncSessionLocal() as session:

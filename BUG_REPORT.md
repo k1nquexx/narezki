@@ -218,7 +218,8 @@
 
 ---
 
-### [BUG-17] `MINOR` — Гонка при динамической смене `max_render_workers`
+### [BUG-17] [FIXED] `MINOR` — Гонка при динамической смене `max_render_workers`
+- **Статус:** `[FIXED]` — реализован `_DynamicSemaphore` (`backend/app/core/queue_manager.py`), изменяющий лимит конкурентности `set_limit()` на месте без замены экземпляра семафора. Подтверждено тестом `test_bug17_dynamic_render_semaphore_concurrency`.
 - **Файл и строка:** `backend/app/core/queue_manager.py:162-166`
 - **Суть проблемы:** `set_render_concurrency()` пересоздаёт `self._render_semaphore = asyncio.Semaphore(clamped)`. Уже запущенные задачи продолжают удерживать ссылку на старый семафор, а новые получают новый — временно может выполняться до `old_limit + new_limit` одновременных рендеров (риск превышения лимита NVENC-сессий на потребительских GPU).
 - **План исправления:** Хранить один семафор или управляемый счётчик конкурентности на `QueueManager`, а не заменять объект `Semaphore` на лету.

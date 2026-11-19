@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from app.core import config as cfg
-from app.core.queue_manager import JobCancelledError, JobContext
+from app.core.queue_manager import JobCancelledError, JobContext, QueueManager
 from app.core.schemas import LLMHighlightItem
 from app.services.analyzer import llm_highlights, pipeline as analyzer_pipeline
 from app.services.analyzer import transcriber
@@ -673,6 +673,58 @@ async def test_bug16_snap_boundaries_short_duration_and_min_duration(monkeypatch
             action_bursts=[],
         )
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_bug17_dynamic_render_semaphore_concurrency() -> None:
+    qm = QueueManager()
+    sem = qm._render_semaphore
+    assert sem.limit == 2
+
+    active = 0
+    max_observed_after_shrink = 0
+    entered_two = asyncio.Event()
+    release_first_two = asyncio.Event()
+    third_entered = asyncio.Event()
+
+    async def worker(idx: int) -> None:
+        nonlocal active, max_observed_after_shrink
+        async with sem:
+            active += 1
+            if idx == 3:
+                third_entered.set()
+                max_observed_after_shrink = max(max_observed_after_shrink, active)
+            if active == 2 and idx in (1, 2):
+                entered_two.set()
+            if idx in (1, 2):
+                await release_first_two.wait()
+            else:
+                await asyncio.sleep(0.01)
+            active -= 1
+
+    t1 = asyncio.create_task(worker(1))
+    t2 = asyncio.create_task(worker(2))
+    await entered_two.wait()
+
+    # Shrink concurrency to 1 while 2 workers are active; object identity must remain unchanged
+    qm.set_render_concurrency(1)
+    assert qm._render_semaphore is sem
+    assert sem.limit == 1
+
+    t3 = asyncio.create_task(worker(3))
+    await asyncio.sleep(0.03)
+    assert not third_entered.is_set()
+
+    release_first_two.set()
+    await asyncio.gather(t1, t2, t3)
+    assert third_entered.is_set()
+    assert max_observed_after_shrink == 1
+
+    # Increasing concurrency wakes multiple waiters
+    qm.set_render_concurrency(3)
+    assert qm._render_semaphore is sem
+    assert sem.limit == 3
+
 
 
 

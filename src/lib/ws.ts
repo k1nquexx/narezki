@@ -16,6 +16,17 @@ class WSClient {
   private statusListeners = new Set<(connected: boolean) => void>();
 
   connect(wsUrl: string): void {
+    if (this.url && this.url !== wsUrl && this.ws) {
+      this.clearTimers();
+      const prev = this.ws;
+      prev.onopen = null;
+      prev.onmessage = null;
+      prev.onerror = null;
+      prev.onclose = null;
+      this.ws = null;
+      prev.close();
+      this.notifyStatus(false);
+    }
     this.url = wsUrl;
     this.closedManually = false;
     this.openSocket();

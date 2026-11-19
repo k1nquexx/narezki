@@ -71,6 +71,7 @@ interface AppState {
 let wsUnsub: (() => void) | null = null;
 let wsStatusUnsub: (() => void) | null = null;
 let restartUnsub: (() => void) | null = null;
+let restartBindPromise: Promise<void> | null = null;
 
 function makeId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -86,6 +87,102 @@ async function waitForHealth(maxAttempts = 25): Promise<boolean> {
     }
   }
   return false;
+}
+
+type StoreSet = (
+  partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)
+) => void;
+type StoreGet = () => AppState;
+
+async function ensureRealtimeSubscriptions(set: StoreSet, get: StoreGet): Promise<void> {
+  if (!wsStatusUnsub) {
+    wsStatusUnsub = wsClient.onStatus((connected) => {
+      set({ wsConnected: connected });
+    });
+  }
+
+  if (!wsUnsub) {
+    wsUnsub = wsClient.subscribe((evt) => {
+      const data = evt.data ?? {};
+      if (evt.type === "gpu_status") {
+        set({ gpuInfo: data as unknown as GPUInfo });
+      } else if (evt.type === "log") {
+        const entry: LogEntry = {
+          id: makeId(),
+          timestamp: evt.timestamp || new Date().toISOString(),
+          level: (data.level as LogEntry["level"]) || "info",
+          message: String(data.message ?? ""),
+          job_id: (data.job_id as string | null) ?? null,
+          stage: (data.stage as string | null) ?? null,
+        };
+        set((s) => ({ logs: [...s.logs.slice(-299), entry] }));
+      } else if (evt.type === "job_update") {
+        const job = data as unknown as Job;
+        set((s) => {
+          const exists = s.jobs.some((j) => j.id === job.id);
+          const nextJobs = exists
+            ? s.jobs.map((j) => (j.id === job.id ? job : j))
+            : [job, ...s.jobs];
+          return { jobs: nextJobs.slice(0, 150) };
+        });
+
+        if (job.status === "completed") {
+          if (job.job_type === "analyze" || job.job_type.startsWith("ingest")) {
+            void get().refreshProjects();
+            if (job.project_id && job.project_id === get().selectedProjectId) {
+              void get().refreshClips(job.project_id);
+            }
+          } else if (
+            job.job_type === "track_clip" ||
+            job.job_type === "render_preview" ||
+            job.job_type === "export_clip" ||
+            job.job_type === "export_batch" ||
+            job.job_type === "basic_cut"
+          ) {
+            const pid = job.project_id || get().selectedProjectId;
+            if (pid) void get().refreshClips(pid);
+          }
+        } else if (job.status === "failed" && job.error) {
+          get().addToast({
+            type: "error",
+            title: `Ошибка задачи (${job.job_type})`,
+            message: job.error,
+          });
+        }
+      } else if (evt.type === "project_update") {
+        void get().refreshProjects();
+      } else if (evt.type === "clip_update") {
+        const pid = String(data.project_id || "");
+        if (pid && pid === get().selectedProjectId) {
+          void get().refreshClips(pid);
+        }
+      }
+    });
+  }
+
+  if (!restartUnsub) {
+    if (!restartBindPromise) {
+      restartBindPromise = (async () => {
+        try {
+          restartUnsub = await listenBackendRestart(async (nextInfo) => {
+            api.setBaseUrl(nextInfo.url);
+            set({ backendUrl: nextInfo.url });
+            wsClient.disconnect();
+            const ok = await waitForHealth(30);
+            set({ backendConnected: ok, backendError: nextInfo.error });
+            if (ok) {
+              await ensureRealtimeSubscriptions(set, get);
+              wsClient.connect(nextInfo.ws_url);
+              await get().refreshAll();
+            }
+          });
+        } finally {
+          restartBindPromise = null;
+        }
+      })();
+    }
+    await restartBindPromise;
+  }
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -144,6 +241,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   bootstrap: async () => {
     set({ initializing: true, backendError: null });
     try {
+      await ensureRealtimeSubscriptions(set, get);
+
       const info = await getBackendInfo();
       api.setBaseUrl(info.url);
       set({ backendUrl: info.url });
@@ -163,86 +262,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       set({ backendConnected: true, backendError: null });
-
-      if (wsUnsub) wsUnsub();
-      if (wsStatusUnsub) wsStatusUnsub();
-      if (restartUnsub) restartUnsub();
-
-      wsStatusUnsub = wsClient.onStatus((connected) => {
-        set({ wsConnected: connected });
-      });
-
-      wsUnsub = wsClient.subscribe((evt) => {
-        const data = evt.data ?? {};
-        if (evt.type === "gpu_status") {
-          set({ gpuInfo: data as unknown as GPUInfo });
-        } else if (evt.type === "log") {
-          const entry: LogEntry = {
-            id: makeId(),
-            timestamp: evt.timestamp || new Date().toISOString(),
-            level: (data.level as LogEntry["level"]) || "info",
-            message: String(data.message ?? ""),
-            job_id: (data.job_id as string | null) ?? null,
-            stage: (data.stage as string | null) ?? null,
-          };
-          set((s) => ({ logs: [...s.logs.slice(-299), entry] }));
-        } else if (evt.type === "job_update") {
-          const job = data as unknown as Job;
-          set((s) => {
-            const exists = s.jobs.some((j) => j.id === job.id);
-            const nextJobs = exists
-              ? s.jobs.map((j) => (j.id === job.id ? job : j))
-              : [job, ...s.jobs];
-            return { jobs: nextJobs.slice(0, 150) };
-          });
-
-          if (job.status === "completed") {
-            if (job.job_type === "analyze" || job.job_type.startsWith("ingest")) {
-              void get().refreshProjects();
-              if (job.project_id && job.project_id === get().selectedProjectId) {
-                void get().refreshClips(job.project_id);
-              }
-            } else if (
-              job.job_type === "track_clip" ||
-              job.job_type === "render_preview" ||
-              job.job_type === "export_clip" ||
-              job.job_type === "export_batch" ||
-              job.job_type === "basic_cut"
-            ) {
-              const pid = job.project_id || get().selectedProjectId;
-              if (pid) void get().refreshClips(pid);
-            }
-          } else if (job.status === "failed" && job.error) {
-            get().addToast({
-              type: "error",
-              title: `Ошибка задачи (${job.job_type})`,
-              message: job.error,
-            });
-          }
-        } else if (evt.type === "project_update") {
-          void get().refreshProjects();
-        } else if (evt.type === "clip_update") {
-          const pid = String(data.project_id || "");
-          if (pid && pid === get().selectedProjectId) {
-            void get().refreshClips(pid);
-          }
-        }
-      });
-
       wsClient.connect(info.ws_url);
-
-      restartUnsub = await listenBackendRestart(async (nextInfo) => {
-        api.setBaseUrl(nextInfo.url);
-        set({ backendUrl: nextInfo.url });
-        wsClient.disconnect();
-        const ok = await waitForHealth(30);
-        set({ backendConnected: ok, backendError: nextInfo.error });
-        if (ok) {
-          wsClient.connect(nextInfo.ws_url);
-          await get().refreshAll();
-        }
-      });
-
       await get().refreshAll();
     } catch (err) {
       set({
@@ -256,19 +276,28 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   reconnectBackend: async () => {
     set({ initializing: true, backendError: null });
-    wsClient.disconnect();
-    const info = await restartBackend();
-    api.setBaseUrl(info.url);
-    set({ backendUrl: info.url });
-    const ok = await waitForHealth(30);
-    set({
-      backendConnected: ok,
-      backendError: ok ? null : info.error || "Бэкенд не отвечает после перезапуска.",
-      initializing: false,
-    });
-    if (ok) {
-      wsClient.connect(info.ws_url);
-      await get().refreshAll();
+    try {
+      await ensureRealtimeSubscriptions(set, get);
+      wsClient.disconnect();
+      const info = await restartBackend();
+      api.setBaseUrl(info.url);
+      set({ backendUrl: info.url });
+      const ok = await waitForHealth(30);
+      set({
+        backendConnected: ok,
+        backendError: ok ? null : info.error || "Бэкенд не отвечает после перезапуска.",
+      });
+      if (ok) {
+        wsClient.connect(info.ws_url);
+        await get().refreshAll();
+      }
+    } catch (err) {
+      set({
+        backendConnected: false,
+        backendError: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      set({ initializing: false });
     }
   },
 

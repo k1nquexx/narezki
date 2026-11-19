@@ -124,7 +124,8 @@
 
 ---
 
-### [BUG-08] `MAJOR` — После «Повторить запуск» бэкенда WebSocket-подписки не восстанавливаются
+### [BUG-08] [FIXED] `MAJOR` — После «Повторить запуск» бэкенда WebSocket-подписки не восстанавливаются
+- **Статус:** `[FIXED]` — регистрация `wsClient.onStatus`, `wsClient.subscribe` и `listenBackendRestart` вынесена в идемпотентную `ensureRealtimeSubscriptions()` (`src/store/useAppStore.ts`), вызываемую в `bootstrap()` и `reconnectBackend()`. Проверено `npx.cmd tsc --noEmit`.
 - **Файл и строка:** `src/store/useAppStore.ts:144-164, 257-273`
 - **Суть проблемы:** Если при старте приложения `bootstrap()` не дождался ответа `/api/system/health` (`waitForHealth(30)` вернул `false`), функция завершается на строке 162 **до** вызова `wsClient.subscribe(...)`, `wsClient.onStatus(...)` и `listenBackendRestart(...)`. Когда пользователь нажимает «Повторить запуск» (`reconnectBackend()`), вызывается `wsClient.connect(info.ws_url)`, но ни один обработчик WebSocket так и не регистрируется. В итоге статус WS остаётся `false`, живые логи, телеметрия GPU и прогресс задач не работают до полной перезагрузки окна.
 - **План исправления:** Вынести регистрацию подписок `wsClient.onStatus`, `wsClient.subscribe` и `listenBackendRestart` в идемпотентную функцию `ensureRealtimeSubscriptions(set, get)` и вызывать её как в `bootstrap()`, так и в `reconnectBackend()`.

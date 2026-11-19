@@ -440,7 +440,10 @@ async def render_clip(
             v_cur = "v_ov"
 
         # 3e. Audio loudness normalization on main segment
-        fg.append(f"[{a_cur}]loudnorm=I=-14:TP=-1.5:LRA=11[a_norm]")
+        fg.append(
+            f"[{a_cur}]loudnorm=I=-14:TP=-1.5:LRA=11,"
+            "aformat=sample_rates=48000:channel_layouts=stereo[a_norm]"
+        )
         a_cur = "a_norm"
 
         # 3f. Mode 1 Video Ad Insert (mid_roll / outro)

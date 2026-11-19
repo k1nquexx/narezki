@@ -12,6 +12,10 @@ import pytest
 from app.core import config as cfg
 from app.services.analyzer import transcriber
 from app.services.analyzer.transcriber import transcribe_video
+from app.services.renderer.ad_injector import (
+    build_overlay_input_args,
+    build_video_ad_splice_filtergraph,
+)
 from app.services.renderer.ffmpeg_runner import _get_filter_script_flag
 from app.services.renderer.subtitle_ass import format_ass_filter_path, generate_ass_file
 from app.services.tracker import yolo_tracker
@@ -212,6 +216,36 @@ async def test_bug04_gpu_to_thread_cancellation_waits_for_worker_cleanup(
 
     assert yolo_cleaned.is_set()
     assert not gpu_sem.locked()
+
+
+def test_bug05_ad_injector_loudnorm_sample_rate_and_av1_webm(tmp_path: Path) -> None:
+    av1_webm = tmp_path / "overlay_av1.webm"
+    av1_webm.write_bytes(b"")
+    args_av1 = build_overlay_input_args(av1_webm, clip_duration=5.0, video_codec="av1")
+    assert "-c:v" not in args_av1
+    assert args_av1[-1] == str(av1_webm)
+
+    args_vp8 = build_overlay_input_args(av1_webm, clip_duration=5.0, video_codec="vp8")
+    assert args_vp8[:2] == ["-c:v", "libvpx"]
+
+    fg = build_video_ad_splice_filtergraph(
+        v_main="v_cur",
+        a_main="a_cur",
+        ad_v_in="1:v",
+        ad_a_in="1:a",
+        v_out="v_final",
+        a_out="a_final",
+        main_duration=4.0,
+        ad_duration=3.0,
+        target_fps=30,
+        insert_position="outro",
+    )
+    fg_text = "\n".join(fg)
+    assert "setpts=PTS-STARTPTS[_ad_v]" in fg_text
+    ad_a_line = [ln for ln in fg if "[_ad_a]" in ln][0]
+    assert ad_a_line.index("loudnorm=") < ad_a_line.index("aformat=sample_rates=48000")
+    assert "asetpts=PTS-STARTPTS[_ad_a]" in ad_a_line
+
 
 
 

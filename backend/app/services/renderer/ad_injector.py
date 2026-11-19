@@ -21,17 +21,29 @@ def build_overlay_input_args(
         return ["-ignore_loop", "0", "-t", f"{dur:.3f}", "-i", str(asset_path)]
     if ext == ".webm":
         codec = (video_codec or "").lower()
-        decoder = "libvpx" if codec == "vp8" else "libvpx-vp9"
-        return [
-            "-c:v",
-            decoder,
-            "-stream_loop",
-            "-1",
-            "-t",
-            f"{dur:.3f}",
-            "-i",
-            str(asset_path),
-        ]
+        if codec == "vp8":
+            return [
+                "-c:v",
+                "libvpx",
+                "-stream_loop",
+                "-1",
+                "-t",
+                f"{dur:.3f}",
+                "-i",
+                str(asset_path),
+            ]
+        if codec in ("vp9", ""):
+            return [
+                "-c:v",
+                "libvpx-vp9",
+                "-stream_loop",
+                "-1",
+                "-t",
+                f"{dur:.3f}",
+                "-i",
+                str(asset_path),
+            ]
+        return ["-stream_loop", "-1", "-t", f"{dur:.3f}", "-i", str(asset_path)]
     return ["-stream_loop", "-1", "-t", f"{dur:.3f}", "-i", str(asset_path)]
 
 
@@ -92,16 +104,16 @@ def build_video_ad_splice_filtergraph(
 
     lines = [
         f"[{ad_v_in}]scale=1080:1920:force_original_aspect_ratio=decrease,"
-        f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps={fps},format=yuv420p[_ad_v]"
+        f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps={fps},format=yuv420p,setpts=PTS-STARTPTS[_ad_v]"
     ]
 
     if ad_a_in:
         lines.append(
-            f"[{ad_a_in}]aformat=sample_rates=48000:channel_layouts=stereo,"
-            f"loudnorm=I=-14:TP=-1.5:LRA=11[_ad_a]"
+            f"[{ad_a_in}]loudnorm=I=-14:TP=-1.5:LRA=11,"
+            f"aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[_ad_a]"
         )
     else:
-        lines.append(f"anullsrc=r=48000:cl=stereo:d={ad_dur:.3f}[_ad_a]")
+        lines.append(f"anullsrc=r=48000:cl=stereo:d={ad_dur:.3f},asetpts=PTS-STARTPTS[_ad_a]")
 
     use_mid_roll = False
     split_t = main_duration * 0.5

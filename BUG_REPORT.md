@@ -90,7 +90,8 @@
 
 ---
 
-### [BUG-05] `MAJOR` — Ошибки `filter_complex` в `ad_injector.py`: рассинхрон sample rate после `loudnorm`, отсутствие `setpts` и краш AV1 WebM
+### [BUG-05] [FIXED] `MAJOR` — Ошибки `filter_complex` в `ad_injector.py`: рассинхрон sample rate после `loudnorm`, отсутствие `setpts` и краш AV1 WebM
+- **Статус:** `[FIXED]` — `aformat=sample_rates=48000` и `asetpts=PTS-STARTPTS` перенесены после `loudnorm` (в `ad_injector.py` и `ffmpeg_runner.py`), добавлен `setpts=PTS-STARTPTS` для `_ad_v`, принудительный декодер в `build_overlay_input_args` оставлен только для `vp8`/`vp9`. Подтверждено тестами `test_bug05_ad_injector_loudnorm_sample_rate_and_av1_webm` и `test_m5_ads_anticid_and_batch_export`.
 - **Файл и строка:** `backend/app/services/renderer/ad_injector.py:22-24, 93-105, 117-136`
 - **Суть проблемы:**
   1. **Sample rate mismatch в `concat`:** фильтр `loudnorm` в FFmpeg внутри повышает частоту дискретизации до **192 000 Hz**. Для основного аудио `aformat=sample_rates=48000:channel_layouts=stereo` стоит *после* `loudnorm` (строки 123, 133), а для рекламного ролика `_ad_a` (строки 100–101) `aformat=sample_rates=48000` стоит **до** `loudnorm`. В результате в `concat=n=3:v=1:a=1` подаются потоки 48 kHz и 192 kHz одновременно.

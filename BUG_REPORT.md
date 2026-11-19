@@ -199,7 +199,8 @@
 
 ---
 
-### [BUG-15] `MAJOR` — Отсутствие `torch` (CUDA) в `backend/requirements.txt`
+### [BUG-15] [FIXED] `MAJOR` — Отсутствие `torch` (CUDA) в `backend/requirements.txt`
+- **Статус:** `[FIXED]` — добавлены `--extra-index-url https://download.pytorch.org/whl/cu124`, `torch>=2.6.0` и `torchvision>=0.21.0` в `backend/requirements.txt` и выделен `backend/requirements-cpu.txt` для CPU-окружений. Проверено `pip check`.
 - **Файл и строка:** `backend/requirements.txt:1-20`
 - **Суть проблемы:** В `requirements.txt` не указан `torch`, хотя `cuda_env.py` и `yolo_tracker.py` напрямую импортируют `torch` и рассчитывают на CUDA-сборку (в текущем `.venv` вручную стоит `torch==2.6.0+cu124`). При чистой установке `pip install -r requirements.txt` на Windows зависимость `ultralytics` подтянет CPU-версию `torch` из PyPI, из-за чего `torch.cuda.is_available()` станет `False` и GPU-ускорение молча отключится.
 - **План исправления:** Явно зафиксировать совместимость `torch` в `requirements.txt` / разделить `requirements-cuda.txt` (с `--extra-index-url https://download.pytorch.org/whl/cu124`) и `requirements-cpu.txt`, документировав установку.

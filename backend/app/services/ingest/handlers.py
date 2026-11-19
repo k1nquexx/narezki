@@ -44,7 +44,7 @@ async def _finalize_project_media(
 ) -> dict[str, Any]:
     proj_dir = get_project_dir(project_id)
     await ctx.update_progress(progress_offset, "probe", "Чтение параметров видео (FFprobe)...")
-    meta = await probe_media(source_path)
+    meta = await probe_media(source_path, require_video=True)
 
     thumb_path = proj_dir / "thumb.jpg"
     await ctx.update_progress(

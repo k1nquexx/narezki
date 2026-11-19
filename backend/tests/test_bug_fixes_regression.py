@@ -13,7 +13,7 @@ from app.core import config as cfg
 from app.core.queue_manager import JobCancelledError, JobContext
 from app.services.analyzer import transcriber
 from app.services.analyzer.transcriber import transcribe_video
-from app.services.ingest.ffprobe_utils import probe_media
+from app.services.ingest.ffprobe_utils import parse_ffprobe_output, probe_media
 from app.services.renderer import handlers as render_handlers
 from app.services.renderer.ad_injector import (
     build_overlay_input_args,
@@ -412,6 +412,81 @@ async def test_bug11_media_stream_no_cache_header(api_client, fixtures_dir: Path
     assert range_resp.headers.get("cache-control") == "no-cache"
 
     await api_client.delete(f"/api/projects/{proj_id}")
+
+
+@pytest.mark.asyncio
+async def test_bug12_ffprobe_na_values_and_audio_only_rejection(tmp_path: Path) -> None:
+    dummy = tmp_path / "dummy.mkv"
+    dummy.write_bytes(b"1234")
+
+    # Test "N/A" fields in format and stream metadata
+    parsed = parse_ffprobe_output(
+        {
+            "format": {"duration": "N/A", "bit_rate": "N/A", "size": "N/A"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1920,
+                    "height": 1080,
+                    "duration": "12.5",
+                    "avg_frame_rate": "30/1",
+                }
+            ],
+        },
+        dummy,
+        require_video=True,
+    )
+    assert parsed["duration"] == 12.5
+    assert parsed["bitrate"] == 0
+    assert parsed["size_bytes"] == 4
+    assert parsed["width"] == 1920
+
+    # Cover art (attached_pic == 1) must be ignored and rejected when require_video=True
+    with pytest.raises(ValueError, match="не содержит видеопотока"):
+        parse_ffprobe_output(
+            {
+                "format": {"duration": "3.0"},
+                "streams": [
+                    {
+                        "codec_type": "video",
+                        "codec_name": "mjpeg",
+                        "width": 500,
+                        "height": 500,
+                        "disposition": {"attached_pic": 1},
+                    },
+                    {"codec_type": "audio", "codec_name": "mp3"},
+                ],
+            },
+            dummy,
+            require_video=True,
+        )
+
+    # Real audio-only file via ffmpeg + ffprobe
+    audio_only = tmp_path / "audio_only.wav"
+    ffmpeg = cfg.get_ffmpeg_path()
+    subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=1",
+            str(audio_only),
+        ],
+        check=True,
+    )
+    meta_ok = await probe_media(audio_only, require_video=False)
+    assert meta_ok["has_audio"] is True
+    assert meta_ok["width"] == 0
+
+    with pytest.raises(ValueError, match="не содержит видеопотока"):
+        await probe_media(audio_only, require_video=True)
+
 
 
 

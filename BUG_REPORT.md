@@ -162,7 +162,8 @@
 
 ---
 
-### [BUG-12] `MAJOR` — Некорректная обработка `"N/A"` и audio-only файлов в `ffprobe_utils.py`
+### [BUG-12] [FIXED] `MAJOR` — Некорректная обработка `"N/A"` и audio-only файлов в `ffprobe_utils.py`
+- **Статус:** `[FIXED]` — добавлены `_safe_float()` и `_safe_int()`, фильтрация `disposition.attached_pic == 1` в `parse_ffprobe_output()`, параметр `require_video=True` в `probe_media()` для `_finalize_project_media()` (`ingest/handlers.py`). Подтверждено тестом `test_bug12_ffprobe_na_values_and_audio_only_rejection`.
 - **Файл и строка:** `backend/app/services/ingest/ffprobe_utils.py:70-94`
 - **Суть проблемы:**
   1. `float(fmt.get("duration") or 0.0)` и `int(fmt.get("bit_rate") or 0)` падают с `ValueError`, если FFprobe вернул строку `"N/A"` (типично для `.mkv`, `.webm`, `.ts` или недокачанных файлов).

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -215,6 +216,7 @@ async def handle_basic_cut(ctx: JobContext) -> dict[str, Any]:
                 if clip is not None:
                     clip.preview_path = str(out_path)
                     clip.status = "rendered"
+                    clip.updated_at = datetime.now(timezone.utc)
                     await session.commit()
             await ws_manager.emit_clip_update(clip_id, project_id, "rendered", preview_path=str(out_path))
             return {"clip_id": clip_id, "preview_path": str(out_path)}
@@ -370,6 +372,7 @@ async def _render_or_export_single(
                 else:
                     c.preview_path = str(out_mp4)
                     c.status = "rendered"
+                c.updated_at = datetime.now(timezone.utc)
                 await session.commit()
 
         await ws_manager.emit_clip_update(

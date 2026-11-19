@@ -154,7 +154,8 @@
 
 ---
 
-### [BUG-11] `MAJOR` — Кэширование старого превью в `<video>` после повторного рендера клипа
+### [BUG-11] [FIXED] `MAJOR` — Кэширование старого превью в `<video>` после повторного рендера клипа
+- **Статус:** `[FIXED]` — добавлен cache-buster параметр `&v=${encodeURIComponent(clip.updated_at)}` и зависимость `clip.updated_at` в `VideoPreview916.tsx`, явное обновление `clip.updated_at` при сохранении превью/экспорта в `handlers.py` и заголовок `Cache-Control: no-cache` в `media.py`. Подтверждено `tsc --noEmit` и тестом `test_bug11_media_stream_no_cache_header`.
 - **Файл и строка:** `src/components/VideoPreview916.tsx:39-47, 199`
 - **Суть проблемы:** Файл превью всегда перезаписывается по одному и тому же пути `{clip_id}_preview.mp4`. URL `api.mediaUrl(renderedPath)` не содержит cache-buster параметра, а `useEffect` на строке 43 зависит только от `[clip.id, clip.preview_path, clip.export_path]`. После повторного рендера с новыми субтитрами/кропом URL не меняется, и WebView2 продолжает воспроизводить старый кэшированный файл.
 - **План исправления:** Добавить query-параметр версии в `renderedSrc` (например, `&v=${encodeURIComponent(clip.updated_at)}`) и включить `clip.updated_at` в зависимости эффекта перезагрузки `<video>`. Также на бэкенде в `media.py` отдавать `Cache-Control: no-cache` для файлов превью.

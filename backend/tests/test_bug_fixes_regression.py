@@ -386,6 +386,35 @@ async def test_bug07_clip_status_restored_on_cancel(
     await api_client.delete(f"/api/projects/{proj_id}")
 
 
+@pytest.mark.asyncio
+async def test_bug11_media_stream_no_cache_header(api_client, fixtures_dir: Path) -> None:
+    sample = fixtures_dir / "sample_1080p.mp4"
+    imp = await api_client.post(
+        "/api/projects/import-local",
+        json={"file_path": str(sample), "title": "Bug11 Media Cache"},
+    )
+    assert imp.status_code == 200
+    proj_id = imp.json()["project"]["id"]
+    from tests.test_m1_m2_ingest import _wait_job
+
+    await _wait_job(api_client, imp.json()["job"]["id"])
+
+    full_resp = await api_client.get("/api/media/stream", params={"path": str(sample), "v": "123"})
+    assert full_resp.status_code == 200
+    assert full_resp.headers.get("cache-control") == "no-cache"
+
+    range_resp = await api_client.get(
+        "/api/media/stream",
+        params={"path": str(sample), "v": "456"},
+        headers={"Range": "bytes=0-127"},
+    )
+    assert range_resp.status_code == 206
+    assert range_resp.headers.get("cache-control") == "no-cache"
+
+    await api_client.delete(f"/api/projects/{proj_id}")
+
+
+
 
 
 

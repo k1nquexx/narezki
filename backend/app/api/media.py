@@ -101,7 +101,10 @@ async def stream_media(
         return FileResponse(
             path=str(target),
             media_type=media_type,
-            headers={"Accept-Ranges": "bytes"},
+            headers={
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "no-cache",
+            },
         )
 
     if file_size == 0:
@@ -146,6 +149,7 @@ async def stream_media(
         "Content-Range": f"bytes {start}-{end}/{file_size}",
         "Accept-Ranges": "bytes",
         "Content-Length": str(content_length),
+        "Cache-Control": "no-cache",
     }
 
     return StreamingResponse(

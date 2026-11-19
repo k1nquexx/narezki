@@ -38,13 +38,16 @@ export function VideoPreview916({
   const clipDuration = Math.max(0.2, clip.end_time - clip.start_time);
   const renderedPath = clip.export_path || clip.preview_path;
   const proxySrc = api.mediaUrl(project.proxy_path || project.source_path);
-  const renderedSrc = api.mediaUrl(renderedPath);
+  const baseRenderedSrc = api.mediaUrl(renderedPath);
+  const renderedSrc = baseRenderedSrc
+    ? `${baseRenderedSrc}&v=${encodeURIComponent(clip.updated_at || "")}`
+    : "";
 
   useEffect(() => {
     setUseRendered(Boolean(clip.preview_path || clip.export_path));
     setRelTime(0);
     setPlaying(false);
-  }, [clip.id, clip.preview_path, clip.export_path]);
+  }, [clip.id, clip.preview_path, clip.export_path, clip.updated_at]);
 
   // Sync proxy playback bounds [clip.start_time, clip.end_time]
   useEffect(() => {

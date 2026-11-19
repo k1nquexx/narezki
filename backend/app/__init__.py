@@ -1,0 +1,1 @@
+"""Narezki FastAPI backend package."""

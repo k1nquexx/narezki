@@ -1,0 +1,12 @@
+node_modules/
+dist/
+src-tauri/target/
+backend/.venv/
+backend/bin/*.exe
+backend/bin/ffmpeg
+backend/bin/ffprobe
+backend/data/
+backend/.pytest_cache/
+__pycache__/
+*.py[cod]
+.DS_Store

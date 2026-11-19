@@ -29,6 +29,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": [
+      "../backend/app/**/*",
+      "../backend/requirements.txt"
+    ],
     "icon": [
       "icons/icon.png",
       "icons/icon.ico"

@@ -186,7 +186,8 @@
 
 ---
 
-### [BUG-14] `MAJOR` — Кроссплатформенные и сборочные проблемы в Tauri (`src-tauri/`)
+### [BUG-14] [FIXED] `MAJOR` — Кроссплатформенные и сборочные проблемы в Tauri (`src-tauri/`)
+- **Статус:** `[FIXED]` — добавлен фолбэк на `python3`, `PYTHONUTF8=1`/`PYTHONIOENCODING=utf-8`, Unix `process_group(0)` + `kill -TERM -<pgid>`, нормализация путей в `open_in_explorer` (Windows/macOS/Linux) и включение ресурсов бэкенда в `tauri.conf.json` / `resolve_backend_dir()`. Проверено `cargo check`.
 - **Файл и строка:** `src-tauri/src/lib.rs:71-83, 104-120, 129-147, 195-232`, `src-tauri/tauri.conf.json:29-36`
 - **Суть проблемы:**
   1. `resolve_python_executable` (строка 81) на Linux/macOS использует фолбэк `"python"` вместо `"python3"` (на большинстве дистрибутивов Linux и macOS бинарника `python` нет).

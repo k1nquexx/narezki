@@ -13,6 +13,9 @@ use tauri::{
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -51,8 +54,13 @@ fn resolve_backend_dir() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
             candidates.push(exe_dir.join("backend"));
+            candidates.push(exe_dir.join("resources").join("backend"));
+            candidates.push(exe_dir.join("_up_").join("backend"));
+            candidates.push(exe_dir.join("resources").join("_up_").join("backend"));
             if let Some(p1) = exe_dir.parent() {
                 candidates.push(p1.join("backend"));
+                candidates.push(p1.join("Resources").join("backend"));
+                candidates.push(p1.join("Resources").join("_up_").join("backend"));
                 if let Some(p2) = p1.parent() {
                     candidates.push(p2.join("backend"));
                     if let Some(p3) = p2.parent() {
@@ -70,15 +78,25 @@ fn resolve_backend_dir() -> Option<PathBuf> {
 
 fn resolve_python_executable(backend_dir: &PathBuf) -> PathBuf {
     #[cfg(target_os = "windows")]
-    let venv_python = backend_dir.join(".venv").join("Scripts").join("python.exe");
+    {
+        let venv_python = backend_dir.join(".venv").join("Scripts").join("python.exe");
+        if venv_python.exists() {
+            return venv_python;
+        }
+        return PathBuf::from("python");
+    }
 
     #[cfg(not(target_os = "windows"))]
-    let venv_python = backend_dir.join(".venv").join("bin").join("python");
-
-    if venv_python.exists() {
-        venv_python
-    } else {
-        PathBuf::from("python")
+    {
+        let venv_py3 = backend_dir.join(".venv").join("bin").join("python3");
+        if venv_py3.exists() {
+            return venv_py3;
+        }
+        let venv_py = backend_dir.join(".venv").join("bin").join("python");
+        if venv_py.exists() {
+            return venv_py;
+        }
+        PathBuf::from("python3")
     }
 }
 
@@ -103,6 +121,8 @@ fn spawn_backend_process(port: u16) -> Result<Child, String> {
 
     let mut cmd = Command::new(&python_exe);
     cmd.current_dir(&backend_dir)
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
         .args([
             "-m",
             "uvicorn",
@@ -117,6 +137,9 @@ fn spawn_backend_process(port: u16) -> Result<Child, String> {
 
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
+
+    #[cfg(unix)]
+    cmd.process_group(0);
 
     cmd.spawn().map_err(|e| {
         format!(
@@ -139,6 +162,15 @@ fn stop_backend_process(state: &BackendState) {
                     .stderr(Stdio::null())
                     .creation_flags(CREATE_NO_WINDOW);
                 let _ = kill_cmd.status();
+            }
+            #[cfg(unix)]
+            {
+                let pgid = format!("-{}", child.id());
+                let _ = Command::new("kill")
+                    .args(["-TERM", &pgid])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
             }
             let _ = child.kill();
             let _ = child.wait();
@@ -202,10 +234,15 @@ fn open_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let mut cmd = Command::new("explorer");
+        let norm = target.canonicalize().unwrap_or_else(|_| target.clone());
+        let clean = norm
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('/', "\\");
         if target.is_file() {
-            cmd.arg(format!("/select,{}", target.to_string_lossy()));
+            cmd.arg(format!("/select,{}", clean));
         } else {
-            cmd.arg(&target);
+            cmd.arg(&clean);
         }
         cmd.spawn()
             .map_err(|e| format!("Failed to open Explorer: {}", e))?;
@@ -214,17 +251,26 @@ fn open_in_explorer(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        Command::new("open")
-            .arg(&target)
-            .spawn()
+        let mut cmd = Command::new("open");
+        if target.is_file() {
+            cmd.arg("-R").arg(&target);
+        } else {
+            cmd.arg(&target);
+        }
+        cmd.spawn()
             .map_err(|e| format!("Failed to open Finder: {}", e))?;
         return Ok(());
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
+        let open_target = if target.is_file() {
+            target.parent().unwrap_or(&target).to_path_buf()
+        } else {
+            target
+        };
         Command::new("xdg-open")
-            .arg(&target)
+            .arg(&open_target)
             .spawn()
             .map_err(|e| format!("Failed to open file manager: {}", e))?;
         return Ok(());

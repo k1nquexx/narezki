@@ -69,7 +69,8 @@
 
 ---
 
-### [BUG-03] `CRITICAL` — Поломка фильтра FFmpeg `ass=` на путях с апострофом `'` и незаэкранированных именах шрифтов
+### [BUG-03] [FIXED] `CRITICAL` — Поломка фильтра FFmpeg `ass=` на путях с апострофом `'` и незаэкранированных именах шрифтов
+- **Статус:** `[FIXED]` — реализовано двухпроходное экранирование спецсимволов FFmpeg в `format_ass_filter_path()` и санитизация `font_name` в `generate_ass_file()` (`subtitle_ass.py`), подтверждено тестом `test_bug03_ass_path_with_apostrophe_and_font_comma`.
 - **Файл и строка:** `backend/app/services/renderer/subtitle_ass.py:42-47, 62`
 - **Суть проблемы:**
   1. `format_ass_filter_path()` экранирует одинарную кавычку как `posix.replace("'", r"'\''")` — это синтаксис POSIX shell, а **не** парсера графов фильтров FFmpeg (`av_get_token`). Подтверждено E2E-прогоном: на пути вида `.../user's folder/subs.ass` FFmpeg «съедает» кавычку и пытается открыть `.../users folder/subs.ass`, падая с `fopen failed` / `Error: Invalid argument` (`rc=4294967274`). Аналогично не экранируются спецсимволы `libass`/FFmpeg (`\`, `[`, `]`, `;`, `,`).

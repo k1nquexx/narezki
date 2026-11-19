@@ -40,11 +40,21 @@ def _escape_ass_text(text: str) -> str:
 
 
 def format_ass_filter_path(ass_path: Path) -> str:
-    """Escape a Windows/POSIX path for FFmpeg's ass=filename='...' filter inside filter_complex_script."""
-    posix = ass_path.resolve().as_posix().replace("\\", "/")
-    posix = posix.replace(":", r"\:")
-    posix = posix.replace("'", r"'\''")
-    return f"ass=filename='{posix}'"
+    """Escape a Windows/POSIX path for FFmpeg's ass=filename=... filter inside filter_complex_script."""
+    s = ass_path.resolve().as_posix().replace("\\", "/")
+    # Pass 1 (FFmpeg filter option key=value parser): escape \, :, '
+    s = s.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    # Pass 2 (FFmpeg filtergraph av_get_token parser): escape \, :, ', ,, ;, [, ]
+    s = (
+        s.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
+        .replace(",", "\\,")
+        .replace(";", "\\;")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+    )
+    return f"ass=filename={s}"
 
 
 def generate_ass_file(
@@ -59,7 +69,8 @@ def generate_ass_file(
     """Write a stylized 1080x1920 ASS subtitle script with karaoke/word-highlight + optional 3s hook."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    font_name = str(preset.get("font_name") or "Arial")
+    raw_font = str(preset.get("font_name") or "Arial")
+    font_name = raw_font.replace(",", " ").replace("\r", " ").replace("\n", " ").strip() or "Arial"
     font_size = int(preset.get("font_size") or 68)
     primary_ass = hex_to_ass_color(str(preset.get("primary_color") or "#FFFFFF"))
     highlight_ass = hex_to_ass_color(str(preset.get("highlight_color") or "#FFE600"))

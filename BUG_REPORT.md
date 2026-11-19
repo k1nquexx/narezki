@@ -132,7 +132,8 @@
 
 ---
 
-### [BUG-09] `MAJOR` — Потеря несохранённых правок клипа в Студии при любом WebSocket-событии
+### [BUG-09] [FIXED] `MAJOR` — Потеря несохранённых правок клипа в Студии при любом WebSocket-событии
+- **Статус:** `[FIXED]` — добавлено отслеживание `loadedClipIdRef` в `ClipStudioPage.tsx`: полный сброс `draft` происходит только при смене `currentClip.id`, а при серверных обновлениях того же клипа мержатся только runtime-поля (`status`, `preview_path`, `export_path`, `track_data_json`, `updated_at`). Проверено `npx.cmd tsc --noEmit`.
 - **Файл и строка:** `src/pages/ClipStudioPage.tsx:68-70`
 - **Суть проблемы:**
   ```tsx

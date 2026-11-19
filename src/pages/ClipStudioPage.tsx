@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckSquare,
   Crosshair,
@@ -52,6 +52,7 @@ export function ClipStudioPage() {
 
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("crop");
   const [draft, setDraft] = useState<Clip | null>(null);
+  const loadedClipIdRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [resyncing, setResyncing] = useState(false);
 
@@ -66,7 +67,28 @@ export function ClipStudioPage() {
   );
 
   useEffect(() => {
-    setDraft(currentClip ? structuredClone(currentClip) : null);
+    if (!currentClip) {
+      loadedClipIdRef.current = null;
+      setDraft(null);
+      return;
+    }
+    if (currentClip.id !== loadedClipIdRef.current) {
+      loadedClipIdRef.current = currentClip.id;
+      setDraft(structuredClone(currentClip));
+      return;
+    }
+    setDraft((prev) =>
+      prev && prev.id === currentClip.id
+        ? {
+            ...prev,
+            status: currentClip.status,
+            preview_path: currentClip.preview_path,
+            export_path: currentClip.export_path,
+            track_data_json: currentClip.track_data_json ?? prev.track_data_json,
+            updated_at: currentClip.updated_at,
+          }
+        : structuredClone(currentClip)
+    );
   }, [currentClip]);
 
   const activeSubPreset = useMemo(
@@ -114,6 +136,9 @@ export function ClipStudioPage() {
         anti_cid_json: target.anti_cid_json,
         selected_for_export: target.selected_for_export,
       });
+      if (!override || updated.id === loadedClipIdRef.current) {
+        setDraft(structuredClone(updated));
+      }
       await refreshClips(target.project_id);
       return updated;
     } catch (err) {
@@ -158,7 +183,11 @@ export function ClipStudioPage() {
   };
 
   const handleToggleSelectExport = async (c: Clip) => {
-    await api.updateClip(c.id, { selected_for_export: !c.selected_for_export });
+    const nextSelected = !c.selected_for_export;
+    await api.updateClip(c.id, { selected_for_export: nextSelected });
+    setDraft((prev) =>
+      prev && prev.id === c.id ? { ...prev, selected_for_export: nextSelected } : prev
+    );
     if (project) await refreshClips(project.id);
   };
 

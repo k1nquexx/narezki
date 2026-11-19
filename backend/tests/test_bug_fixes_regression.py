@@ -11,8 +11,10 @@ import pytest
 
 from app.core import config as cfg
 from app.core.queue_manager import JobCancelledError, JobContext
-from app.services.analyzer import pipeline as analyzer_pipeline
+from app.core.schemas import LLMHighlightItem
+from app.services.analyzer import llm_highlights, pipeline as analyzer_pipeline
 from app.services.analyzer import transcriber
+from app.services.analyzer.scene_detect import snap_clip_boundaries
 from app.services.analyzer.transcriber import transcribe_video
 from app.services.ingest.ffprobe_utils import parse_ffprobe_output, probe_media
 from app.services.renderer import handlers as render_handlers
@@ -608,6 +610,70 @@ async def test_bug13_patch_clip_null_delete_cleanup_and_missing_project(
     )
     res = await analyzer_pipeline.run_analysis_pipeline(ctx)
     assert res["clip_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bug16_snap_boundaries_short_duration_and_min_duration(monkeypatch) -> None:
+    # 1. Sub-1s duration must never overflow orig_end > duration
+    s, e = snap_clip_boundaries(start=0.0, end=3.0, scenes=[], words=[], duration=0.6)
+    assert 0.0 <= s <= e <= 0.6
+
+    # 2. finalize_highlight_clips must forward min_duration (e.g. 5.0 instead of hardcoded 8.0)
+    items = [
+        LLMHighlightItem(
+            start_time=2.0,
+            end_time=8.0,
+            title="Short Snap",
+            hook_text="HOOK",
+            description="Desc",
+            tags=["#shorts"],
+            virality_score=90.0,
+            category="dialogue",
+            reason="Test",
+        )
+    ]
+    snapped = llm_highlights.finalize_highlight_clips(
+        raw_items=items,
+        scenes=[2.2, 7.8],
+        words=[],
+        duration=20.0,
+        min_duration=5.0,
+    )
+    assert snapped[0]["start_time"] == 2.2
+    assert snapped[0]["end_time"] == 7.8
+
+    # 3. analyze_highlights_llm must NOT retry without response_format on non-BadRequestError
+    calls: list[dict] = []
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            raise RuntimeError("401 Unauthorized")
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.chat = type("Chat", (), {"completions": FakeCompletions()})()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(llm_highlights, "AsyncOpenAI", FakeClient)
+    with pytest.raises(RuntimeError, match="401 Unauthorized"):
+        await llm_highlights.analyze_highlights_llm(
+            base_url="https://example.com/v1",
+            api_key="sk-test",
+            model="test-model",
+            temperature=0.3,
+            duration=20.0,
+            transcript=[],
+            audio_peaks=[],
+            action_bursts=[],
+        )
+    assert len(calls) == 1
+
 
 
 

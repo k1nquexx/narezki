@@ -176,6 +176,7 @@ async def run_analysis_pipeline(ctx: JobContext) -> dict[str, Any]:
             words=whisper_data["words"],
             duration=duration,
             words_per_line=words_per_line,
+            min_duration=min_duration,
         )
 
         analysis_payload = {

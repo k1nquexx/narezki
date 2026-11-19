@@ -207,7 +207,8 @@
 
 ---
 
-### [BUG-16] `MINOR` — Избыточные ретраи LLM, игнорирование `min_duration` в `finalize_highlight_clips` и выход за границы при `duration < 1s`
+### [BUG-16] [FIXED] `MINOR` — Избыточные ретраи LLM, игнорирование `min_duration` в `finalize_highlight_clips` и выход за границы при `duration < 1s`
+- **Статус:** `[FIXED]` — фолбэк-повтор в `analyze_highlights_llm()` ограничен `openai.BadRequestError`, проброшен `min_duration` через `finalize_highlight_clips()` (`llm_highlights.py` / `pipeline.py`), и исправлен клампинг `orig_end <= duration` при `duration < 1s` в `snap_clip_boundaries()` (`scene_detect.py`). Подтверждено тестом `test_bug16_snap_boundaries_short_duration_and_min_duration` и `test_m3_*`.
 - **Файл и строка:** `backend/app/services/analyzer/llm_highlights.py:252-272, 383-415`, `backend/app/services/analyzer/scene_detect.py:106-107`
 - **Суть проблемы:**
   1. `analyze_highlights_llm` при *любой* ошибке (таймаут 90с, 401 Unauthorized, 429 Rate Limit, 500) делает повторный запрос без `response_format`, удваивая время ожидания и расход квоты.

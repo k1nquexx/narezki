@@ -7,7 +7,7 @@ import re
 import uuid
 from typing import Any, Optional
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 from ...core.schemas import LLMHighlightItem
 from .scene_detect import snap_clip_boundaries
@@ -259,7 +259,7 @@ async def analyze_highlights_llm(
                         temperature=temperature,
                         response_format={"type": "json_object"},
                     )
-                except Exception as exc:
+                except BadRequestError as exc:
                     # Retry once without response_format in case provider rejects json_object
                     logger.warning("LLM json_object request failed (%s), retrying plain JSON mode", exc)
                     resp = await client.chat.completions.create(
@@ -386,6 +386,7 @@ def finalize_highlight_clips(
     words: list[dict[str, Any]],
     duration: float,
     words_per_line: int = 3,
+    min_duration: float = 8.0,
 ) -> list[dict[str, Any]]:
     """Snap boundaries to scene cuts/pauses and attach clip-relative word cues."""
     finalized: list[dict[str, Any]] = []
@@ -396,6 +397,7 @@ def finalize_highlight_clips(
             scenes=scenes,
             words=words,
             duration=duration,
+            min_duration=min_duration,
         )
         cues = build_clip_subtitles(words, snapped_start, snapped_end, words_per_line=words_per_line)
         finalized.append(

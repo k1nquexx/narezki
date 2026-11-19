@@ -103,8 +103,10 @@ def snap_clip_boundaries(
     min_duration: float = 8.0,
 ) -> tuple[float, float]:
     """Snap clip start/end cleanly to nearby scene cuts and speech pauses without slicing words."""
-    orig_start = max(0.0, min(float(start), max(0.0, duration - 1.0)))
-    orig_end = max(orig_start + 1.0, min(float(end), duration))
+    safe_dur = max(0.0, float(duration))
+    min_span = min(1.0, safe_dur)
+    orig_start = max(0.0, min(float(start), max(0.0, safe_dur - min_span)))
+    orig_end = min(safe_dur, max(orig_start + min_span, min(float(end), safe_dur)))
 
     # Collect speech pause boundaries
     pause_starts: list[float] = []
@@ -146,8 +148,8 @@ def snap_clip_boundaries(
         if pause_candidates_end:
             best_end = min(pause_candidates_end, key=lambda p: abs(p - orig_end))
 
-    best_start = max(0.0, min(best_start, duration))
-    best_end = max(0.0, min(best_end, duration))
+    best_start = max(0.0, min(best_start, safe_dur))
+    best_end = max(0.0, min(best_end, safe_dur))
 
     if best_end - best_start < min_duration:
         return round(orig_start, 2), round(orig_end, 2)

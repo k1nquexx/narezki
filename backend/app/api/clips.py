@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from contextlib import suppress
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.config import EXPORTS_DIR, PROJECTS_DIR
 from ..core.database import get_db
 from ..core.models import Clip, Project, SubtitlePreset
 from ..core.queue_manager import queue_manager
@@ -74,6 +78,21 @@ async def create_clip(body: ClipCreate, db: AsyncSession = Depends(get_db)) -> C
     return ClipOut.model_validate(clip)
 
 
+_NON_NULLABLE_UPDATE_FIELDS = {
+    "title",
+    "hook_text",
+    "hook_enabled",
+    "description",
+    "tags_json",
+    "start_time",
+    "end_time",
+    "crop_mode",
+    "subtitles_enabled",
+    "anti_cid_enabled",
+    "selected_for_export",
+}
+
+
 @router.patch("/{clip_id}", response_model=ClipOut)
 async def update_clip(
     clip_id: str,
@@ -85,6 +104,10 @@ async def update_clip(
         raise HTTPException(status_code=404, detail="Клип не найден")
 
     updates = body.model_dump(exclude_unset=True)
+    for field in _NON_NULLABLE_UPDATE_FIELDS:
+        if field in updates and updates[field] is None:
+            updates.pop(field, None)
+
     next_start = updates.get("start_time", clip.start_time)
     next_end = updates.get("end_time", clip.end_time)
     if next_end <= next_start:
@@ -130,8 +153,25 @@ async def delete_clip(clip_id: str, db: AsyncSession = Depends(get_db)) -> dict[
     clip = await db.get(Clip, clip_id)
     if clip is None:
         raise HTTPException(status_code=404, detail="Клип не найден")
+
+    preview_path = clip.preview_path
+    export_path = clip.export_path
+
+    await queue_manager.cancel_clip_jobs(clip_id)
     await db.delete(clip)
     await db.commit()
+
+    if preview_path:
+        with suppress(OSError):
+            p = Path(preview_path).resolve()
+            if PROJECTS_DIR.resolve() in p.parents:
+                p.unlink(missing_ok=True)
+    if export_path:
+        with suppress(OSError):
+            ep = Path(export_path).resolve()
+            if EXPORTS_DIR.resolve() in ep.parents:
+                ep.unlink(missing_ok=True)
+                ep.with_suffix(".txt").unlink(missing_ok=True)
     return {"ok": True}
 
 

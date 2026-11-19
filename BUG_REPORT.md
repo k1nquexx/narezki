@@ -172,7 +172,8 @@
 
 ---
 
-### [BUG-13] `MAJOR` — HTTP 500 при `null` в `PATCH /api/clips`, утечка файлов при удалении клипа и `IntegrityError` при удалении проекта во время анализа
+### [BUG-13] [FIXED] `MAJOR` — HTTP 500 при `null` в `PATCH /api/clips`, утечка файлов при удалении клипа и `IntegrityError` при удалении проекта во время анализа
+- **Статус:** `[FIXED]` — в `update_clip()` (`clips.py`) игнорируются `None` для не-nullable полей, в `delete_clip()` добавлены `queue_manager.cancel_clip_jobs()` и очистка `preview_path`/`export_path` (`.mp4` + `.txt`), а в `run_analysis_pipeline()` (`pipeline.py`) добавлен ранний выход при удалённом проекте. Подтверждено тестом `test_bug13_patch_clip_null_delete_cleanup_and_missing_project`.
 - **Файл и строка:** `backend/app/api/clips.py:87-91, 128-135`, `backend/app/services/analyzer/pipeline.py:191-253`
 - **Суть проблемы:**
   1. В `update_clip` (`clips.py:88-90`) при передаче `{"start_time": null}` или `{"end_time": null}` метод `updates.get("start_time", clip.start_time)` вернёт `None`, и сравнение `next_end <= next_start` выбросит `TypeError` (HTTP 500).

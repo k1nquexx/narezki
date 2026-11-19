@@ -190,9 +190,16 @@ async def run_analysis_pipeline(ctx: JobContext) -> dict[str, Any]:
 
         async with AsyncSessionLocal() as session:
             proj = await session.get(Project, project_id)
-            if proj is not None:
-                proj.analysis_json = analysis_payload
-                proj.status = "analyzed"
+            if proj is None:
+                return {
+                    "project_id": project_id,
+                    "clip_count": 0,
+                    "scenes_count": len(scene_data["scenes"]),
+                    "peaks_count": len(audio_data["peaks"]),
+                    "words_count": len(whisper_data["words"]),
+                }
+            proj.analysis_json = analysis_payload
+            proj.status = "analyzed"
 
             # Clean up orphaned preview files for auto-generated clips before replacing
             old_auto_previews = (

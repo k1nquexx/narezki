@@ -165,12 +165,12 @@ class QueueManager:
             self._render_limit = clamped
             self._render_semaphore = asyncio.Semaphore(clamped)
 
-    async def cancel_project_jobs(self, project_id: str) -> int:
+    async def _cancel_jobs_where(self, *conditions: Any) -> int:
         async with AsyncSessionLocal() as session:
             rows = (
                 await session.execute(
                     select(Job.id).where(
-                        Job.project_id == project_id,
+                        *conditions,
                         Job.status.in_(["queued", "running"]),
                     )
                 )
@@ -182,6 +182,12 @@ class QueueManager:
             if await self.cancel_job(jid) is not None:
                 cancelled_count += 1
         return cancelled_count
+
+    async def cancel_project_jobs(self, project_id: str) -> int:
+        return await self._cancel_jobs_where(Job.project_id == project_id)
+
+    async def cancel_clip_jobs(self, clip_id: str) -> int:
+        return await self._cancel_jobs_where(Job.clip_id == clip_id)
 
     async def enqueue(
         self,

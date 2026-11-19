@@ -11,6 +11,7 @@ import pytest
 
 from app.core import config as cfg
 from app.core.queue_manager import JobCancelledError, JobContext
+from app.services.analyzer import pipeline as analyzer_pipeline
 from app.services.analyzer import transcriber
 from app.services.analyzer.transcriber import transcribe_video
 from app.services.ingest.ffprobe_utils import parse_ffprobe_output, probe_media
@@ -486,6 +487,128 @@ async def test_bug12_ffprobe_na_values_and_audio_only_rejection(tmp_path: Path) 
 
     with pytest.raises(ValueError, match="не содержит видеопотока"):
         await probe_media(audio_only, require_video=True)
+
+
+@pytest.mark.asyncio
+async def test_bug13_patch_clip_null_delete_cleanup_and_missing_project(
+    api_client, fixtures_dir: Path, monkeypatch
+) -> None:
+    sample = fixtures_dir / "sample_1080p.mp4"
+    imp = await api_client.post(
+        "/api/projects/import-local",
+        json={"file_path": str(sample), "title": "Bug13 Project"},
+    )
+    assert imp.status_code == 200
+    proj_id = imp.json()["project"]["id"]
+    from tests.test_m1_m2_ingest import _wait_job
+
+    await _wait_job(api_client, imp.json()["job"]["id"])
+
+    c_resp = await api_client.post(
+        "/api/clips",
+        json={
+            "project_id": proj_id,
+            "title": "Clip Null Patch",
+            "start_time": 1.0,
+            "end_time": 4.0,
+        },
+    )
+    assert c_resp.status_code == 200
+    clip_id = c_resp.json()["id"]
+
+    # 1. PATCH with null start_time/end_time must NOT return 500
+    patch_resp = await api_client.patch(
+        f"/api/clips/{clip_id}",
+        json={"start_time": None, "end_time": None, "title": "Updated Title"},
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["start_time"] == 1.0
+    assert patch_resp.json()["end_time"] == 4.0
+    assert patch_resp.json()["title"] == "Updated Title"
+
+    # 2. DELETE /api/clips must remove preview/export artifacts inside managed directories
+    prev_dir = cfg.get_project_dir(proj_id) / "previews"
+    prev_dir.mkdir(parents=True, exist_ok=True)
+    prev_file = prev_dir / f"{clip_id}_preview.mp4"
+    prev_file.write_bytes(b"preview-data")
+
+    cfg.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    exp_dir = cfg.EXPORTS_DIR / f"bug13_{proj_id[:6]}"
+    exp_dir.mkdir(parents=True, exist_ok=True)
+    exp_file = exp_dir / "clip.mp4"
+    exp_txt = exp_dir / "clip.txt"
+    exp_file.write_bytes(b"export-data")
+    exp_txt.write_text("meta", encoding="utf-8")
+
+    from app.core.database import AsyncSessionLocal
+    from app.core.models import Clip, Project
+    from app.core.schemas import LLMHighlightItem
+
+    async with AsyncSessionLocal() as session:
+        c = await session.get(Clip, clip_id)
+        assert c is not None
+        c.preview_path = str(prev_file)
+        c.export_path = str(exp_file)
+        await session.commit()
+
+    del_resp = await api_client.delete(f"/api/clips/{clip_id}")
+    assert del_resp.status_code == 200
+    assert not prev_file.exists()
+    assert not exp_file.exists()
+    assert not exp_txt.exists()
+
+    # 3. Project deleted mid-analysis must not raise IntegrityError
+    async def fake_audio(*_a, **_kw):
+        return {"peaks": [], "rms_db": -20.0}
+
+    async def fake_scenes(*_a, **_kw):
+        return {"scenes": [2.0], "action_bursts": []}
+
+    def fake_heuristic(*_a, **_kw):
+        return [
+            LLMHighlightItem(
+                start_time=0.0,
+                end_time=5.0,
+                title="Highlight",
+                hook_text="HOOK",
+                description="Desc",
+                tags=["#shorts"],
+                virality_score=80.0,
+                category="dialogue",
+                reason="Test",
+            )
+        ]
+
+    monkeypatch.setattr(analyzer_pipeline, "analyze_audio_peaks", fake_audio)
+    monkeypatch.setattr(analyzer_pipeline, "detect_scenes", fake_scenes)
+    monkeypatch.setattr(analyzer_pipeline, "analyze_highlights_heuristic", fake_heuristic)
+
+    orig_finalize = analyzer_pipeline.finalize_highlight_clips
+
+    async def fake_transcribe_and_delete(*_a, **_kw):
+        async with AsyncSessionLocal() as session:
+            p = await session.get(Project, proj_id)
+            if p is not None:
+                await session.delete(p)
+                await session.commit()
+        return {"language": "en", "device": "cpu", "compute_type": "int8", "segments": [], "words": []}
+
+    monkeypatch.setattr(analyzer_pipeline, "transcribe_video", fake_transcribe_and_delete)
+    monkeypatch.setattr(analyzer_pipeline, "finalize_highlight_clips", orig_finalize)
+
+    ctx = JobContext(
+        job_id="job-bug13-analyze",
+        job_type="analyze",
+        project_id=proj_id,
+        clip_id=None,
+        payload={"mode": "heuristic"},
+        cancel_event=asyncio.Event(),
+        gpu_semaphore=asyncio.Semaphore(1),
+        render_semaphore=asyncio.Semaphore(1),
+    )
+    res = await analyzer_pipeline.run_analysis_pipeline(ctx)
+    assert res["clip_count"] == 0
+
 
 
 

@@ -45,7 +45,8 @@
 
 ## Список найденных багов и точек отказа
 
-### [BUG-01] `CRITICAL` — На Linux/macOS выбирается Windows-бинарник `ffmpeg.exe` / `ffprobe.exe`
+### [BUG-01] [FIXED] `CRITICAL` — На Linux/macOS выбирается Windows-бинарник `ffmpeg.exe` / `ffprobe.exe`
+- **Статус:** `[FIXED]` — добавлена проверка `sys.platform == "win32"` в `_resolve_binary()` (`backend/app/core/config.py`), подтверждено тестом `test_bug01_cross_platform_ffmpeg_paths`.
 - **Файл и строка:** `backend/app/core/config.py:52-81`
 - **Суть проблемы:** Функции `get_ffmpeg_path()` и `get_ffprobe_path()` безусловно проверяют `BIN_DIR / "ffmpeg.exe"` (и `ffprobe.exe`) **до** проверки `BIN_DIR / "ffmpeg"` и системного `PATH`, не проверяя `sys.platform == "win32"`. Поскольку `backend/bin/ffmpeg.exe` и `backend/bin/ffprobe.exe` лежат в репозитории, при запуске на Linux или macOS бэкенд попытается выполнить `.exe`-файл и упадёт с `OSError: [Errno 8] Exec format error` или `PermissionError` на каждом вызове FFmpeg/FFprobe.
 - **План исправления:** Проверять `sys.platform == "win32"`: на Windows искать `BIN_DIR / "ffmpeg.exe"` -> `shutil.which("ffmpeg")`, на POSIX искать `BIN_DIR / "ffmpeg"` (с проверкой `os.access(..., os.X_OK)`) -> `shutil.which("ffmpeg")`. Аналогично для `get_ffprobe_path()`.

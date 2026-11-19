@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -49,36 +50,34 @@ def ensure_data_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
-def get_ffmpeg_path() -> str:
-    """Return path to bundled ffmpeg.exe or system ffmpeg."""
-    local = BIN_DIR / "ffmpeg.exe"
-    if local.exists():
-        return str(local)
-    local_unix = BIN_DIR / "ffmpeg"
-    if local_unix.exists():
-        return str(local_unix)
-    found = shutil.which("ffmpeg")
+def _resolve_binary(name: str) -> str:
+    """Resolve a bundled platform-specific binary or fall back to system PATH."""
+    if sys.platform == "win32":
+        local = BIN_DIR / f"{name}.exe"
+        if local.exists() and local.is_file():
+            return str(local)
+    else:
+        local_unix = BIN_DIR / name
+        if local_unix.exists() and local_unix.is_file() and os.access(local_unix, os.X_OK):
+            return str(local_unix)
+
+    found = shutil.which(name)
     if found:
         return found
+    expected = f"{name}.exe" if sys.platform == "win32" else name
     raise FileNotFoundError(
-        f"FFmpeg binary not found in {BIN_DIR} or PATH. Ensure ffmpeg.exe is present in backend/bin."
+        f"{name} binary not found in {BIN_DIR} or PATH. Ensure {expected} is installed or present in backend/bin."
     )
+
+
+def get_ffmpeg_path() -> str:
+    """Return path to bundled ffmpeg or system ffmpeg for the current OS."""
+    return _resolve_binary("ffmpeg")
 
 
 def get_ffprobe_path() -> str:
-    """Return path to bundled ffprobe.exe or system ffprobe."""
-    local = BIN_DIR / "ffprobe.exe"
-    if local.exists():
-        return str(local)
-    local_unix = BIN_DIR / "ffprobe"
-    if local_unix.exists():
-        return str(local_unix)
-    found = shutil.which("ffprobe")
-    if found:
-        return found
-    raise FileNotFoundError(
-        f"FFprobe binary not found in {BIN_DIR} or PATH. Ensure ffprobe.exe is present in backend/bin."
-    )
+    """Return path to bundled ffprobe or system ffprobe for the current OS."""
+    return _resolve_binary("ffprobe")
 
 
 class AppSettingsModel(BaseModel):

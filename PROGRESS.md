@@ -30,6 +30,27 @@
 
 ---
 
+## Стабилизация и исправление багов (`BUG-01`..`BUG-20`)
+
+Все 20 багов из [BUG_REPORT.md](file:///f:/projects/narezki/BUG_REPORT.md) (4 `CRITICAL`, 11 `MAJOR`, 5 `MINOR`) устранены атомарными коммитами с прогоном регрессионных тестов:
+
+- **`CRITICAL` (`BUG-01`..`BUG-04`):** кроссплатформенный выбор бинарников `ffmpeg`/`ffprobe` по `sys.platform`, фолбэк `faster-whisper` на `int8` при `device="cpu"`, двухпроходное экранирование спецсимволов FFmpeg для `ass=filename=...` и санитизация `font_name`, кооперативное ожидание завершения GPU-потоков (`run_cancellable_thread`) до освобождения `gpu_semaphore`/VRAM при отмене.
+- **`MAJOR` (`BUG-05`..`BUG-15`):** нормализация `48000 Hz` и `asetpts` после `loudnorm` + `setpts=PTS-STARTPTS` на рекламных вклейках и поддержка AV1 WebM; нормализация `fps` и масштабирование `mid_roll` при включённом Anti-CID; восстановление статуса клипа при отмене задач; идемпотентное переподключение WS-подписок и защита несохранённого черновика клипа, пробелов в хэштегах и cache-busting превью; обработка `"N/A"` и отклонение audio-only файлов в `ffprobe_utils`; защита `PATCH /api/clips` от `null`, очистка файлов при удалении клипа и проверка существования проекта после анализа; кроссплатформенные улучшения Tauri (`python3`, `PYTHONUTF8=1`, process group kill, нормализация путей `open_in_explorer`, `bundle.resources`); фиксация CUDA-зависимости `torch` в `requirements.txt` и `requirements-cpu.txt`.
+- **`MINOR` (`BUG-16`..`BUG-20`):** повтор LLM только на `BadRequestError`, проброс `min_duration` и клампинг `< 1s` в `snap_clip_boundaries`; `_DynamicSemaphore` для потокобезопасной смены `max_render_workers`; параллельный `export_batch` с изоляцией ошибок и уникализацией имён; закрытие старого WebSocket при смене порта; обработка ошибок в UI-тостах, опция Whisper `"base"`, гарды `isTauriRuntime()`, форматирование 422 `errors`, неблокирующий `shutil.rmtree` после ожидания отменённых задач и ESLint.
+
+### Итоговый отчёт о стабильности системы (2026-11-20)
+
+- **Frontend (`npm.cmd run lint` & `npm.cmd run build`):** `eslint .` (`0` errors, `0` warnings), `tsc && vite build` (`0` ошибок, сборка `dist/assets/index-B9gyz-SL.js` `262.79 kB` за `2.50s`).
+- **Tauri / Rust (`cargo check` в `src-tauri/`):** `Finished dev profile` (`0` ошибок).
+- **Backend (`pytest backend/tests -v`):** **`28 passed in 83.14s`** (все 14 базовых интеграционных тестов M1–M6 + 14 новых регрессионных тестов `test_bug_fixes_regression.py`, 0 ошибок, 0 пропусков), `pip check` — `No broken requirements found`.
+- **Сквозной живой Smoke Test (`uvicorn` на `127.0.0.1:18765`):**
+  - `/api/system/health` (`ok`, `NVIDIA GeForce RTX 3060`, `h264_nvenc`), `/ws` (`gpu_status` + `pong`).
+  - Полный цикл: `import-local` -> `analyze` (`heuristic` + `faster-whisper` CUDA `base` -> `10` слов, `1` клип) -> `track` (YOLOv8 CUDA, `46` точек) -> `export` (с субтитрами `.ass`, 3s хуком и Anti-CID `speed=1.04`).
+  - Валидация итогового MP4 (`7,471,509` байт) через `ffprobe.exe`: `h264` `1080×1920`, `30/1` fps, аудио `aac` `48000 Hz`, длительность `4.833s`, файл `.txt` создан, удаление проекта прошло чисто.
+  - В логах `uvicorn` зафиксировано **`0` необработанных исключений / traceback и `0` строк `[ERROR]`**.
+
+---
+
 ## Архитектура проекта
 
 ```text

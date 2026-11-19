@@ -12,11 +12,13 @@ import pytest
 from app.core import config as cfg
 from app.services.analyzer import transcriber
 from app.services.analyzer.transcriber import transcribe_video
+from app.services.ingest.ffprobe_utils import probe_media
 from app.services.renderer.ad_injector import (
     build_overlay_input_args,
     build_video_ad_splice_filtergraph,
 )
-from app.services.renderer.ffmpeg_runner import _get_filter_script_flag
+from app.services.renderer.anti_cid import build_anti_cid_filtergraph
+from app.services.renderer.ffmpeg_runner import _get_filter_script_flag, render_clip
 from app.services.renderer.subtitle_ass import format_ass_filter_path, generate_ass_file
 from app.services.tracker import yolo_tracker
 from app.services.tracker.yolo_tracker import track_clip_subject
@@ -245,6 +247,49 @@ def test_bug05_ad_injector_loudnorm_sample_rate_and_av1_webm(tmp_path: Path) -> 
     ad_a_line = [ln for ln in fg if "[_ad_a]" in ln][0]
     assert ad_a_line.index("loudnorm=") < ad_a_line.index("aformat=sample_rates=48000")
     assert "asetpts=PTS-STARTPTS[_ad_a]" in ad_a_line
+
+
+@pytest.mark.asyncio
+async def test_bug06_anticid_fps_and_midroll_scaling(fixtures_dir: Path, tmp_path: Path) -> None:
+    lines, _, spd = build_anti_cid_filtergraph(
+        "v_in", "a_in", "v_out", "a_out", config={"speed": 1.05}, target_fps=30
+    )
+    assert spd == pytest.approx(1.05)
+    assert "setpts=(PTS-STARTPTS)/1.05000,fps=30" in lines[0]
+
+    sample = fixtures_dir / "sample_1080p.mp4"
+    ad_video = fixtures_dir / "ad_video.mp4"
+    out_mp4 = tmp_path / "anticid_midroll.mp4"
+    await render_clip(
+        source_path=sample,
+        source_width=1920,
+        source_height=1080,
+        source_has_audio=True,
+        clip_data={
+            "start_time": 0.0,
+            "end_time": 4.0,
+            "crop_mode": "cinema_blur",
+            "subtitles_enabled": False,
+            "hook_enabled": False,
+            "anti_cid_enabled": True,
+            "anti_cid_json": {"zoom": 1.02, "speed": 1.05, "strip_metadata": True},
+        },
+        output_path=out_mp4,
+        ad_preset={
+            "id": "ad1",
+            "ad_type": "video_insert",
+            "asset_path": str(ad_video),
+            "insert_position": "mid_roll",
+            "insert_at_sec": 3.85,  # 3.85 / 1.05 = 3.667s -> valid mid-roll inside 3.81s main_dur!
+            "duration": 3.0,
+        },
+        target_fps=30,
+        fast_preview=True,
+    )
+    meta = await probe_media(out_mp4)
+    assert meta["fps"] == pytest.approx(30.0, abs=0.2)
+    assert 6.6 <= meta["duration"] <= 7.0
+
 
 
 

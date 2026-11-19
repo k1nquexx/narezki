@@ -409,6 +409,7 @@ async def render_clip(
                 v_out="v_cid",
                 a_out="a_cid",
                 config=clip_data.get("anti_cid_json"),
+                target_fps=target_fps,
             )
             fg.extend(cid_lines)
             v_cur = "v_cid"
@@ -451,6 +452,12 @@ async def render_clip(
         if vad_idx is not None and resolved_ad is not None and ad_meta is not None:
             ad_dur = float(ad_meta.get("duration") or resolved_ad.get("duration") or 3.0)
             ad_has_audio = bool(ad_meta.get("has_audio", False))
+            raw_insert_at = resolved_ad.get("insert_at_sec")
+            scaled_insert_at = (
+                float(raw_insert_at) / max(0.5, speed_factor)
+                if raw_insert_at is not None
+                else None
+            )
             fg.extend(
                 build_video_ad_splice_filtergraph(
                     v_main=v_cur,
@@ -463,7 +470,7 @@ async def render_clip(
                     ad_duration=ad_dur,
                     target_fps=target_fps,
                     insert_position=str(resolved_ad.get("insert_position", "outro")),
-                    insert_at_sec=resolved_ad.get("insert_at_sec"),
+                    insert_at_sec=scaled_insert_at,
                 )
             )
             v_cur = "v_final"

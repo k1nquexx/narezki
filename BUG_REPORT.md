@@ -104,7 +104,8 @@
 
 ---
 
-### [BUG-06] `MAJOR` — Несогласованность таймкодов `mid_roll` и частоты кадров при включённом Anti-CID (`speed != 1.0`)
+### [BUG-06] [FIXED] `MAJOR` — Несогласованность таймкодов `mid_roll` и частоты кадров при включённом Anti-CID (`speed != 1.0`)
+- **Статус:** `[FIXED]` — добавлен `fps={target_fps}` в `build_anti_cid_filtergraph()` (`anti_cid.py`) при `speed != 1.0` и масштабирование `insert_at_sec` на `1 / speed_factor` в `ffmpeg_runner.py`. Подтверждено тестом `test_bug06_anticid_fps_and_midroll_scaling`.
 - **Файл и строка:** `backend/app/services/renderer/ffmpeg_runner.py:403-416, 446-468`, `backend/app/services/renderer/anti_cid.py:37-46`
 - **Суть проблемы:**
   1. Для оверлея (строки 435–436) `overlay_start` и `overlay_end` масштабируются на `1 / speed_factor`, а для `mid_roll` видеовклейки `insert_at_sec` (строка 463) передаётся **без масштабирования**. При `speed != 1.0` вставка происходит не в ту секунду клипа, а при `insert_at_sec` близком к концу клипа может вообще выйти за `main_dur` и откатиться к `outro`.

@@ -9,6 +9,7 @@ def build_anti_cid_filtergraph(
     v_out: str,
     a_out: str,
     config: Optional[dict[str, Any]] = None,
+    target_fps: Optional[int] = None,
 ) -> tuple[list[str], list[str], float]:
     """Build Anti-Content ID video/audio filtergraph and container flags.
 
@@ -36,6 +37,9 @@ def build_anti_cid_filtergraph(
 
     if abs(speed - 1.0) > 0.0005:
         v_steps.append(f"setpts=(PTS-STARTPTS)/{speed:.5f}")
+        if target_fps is not None and int(target_fps) > 0:
+            clamped_fps = max(24, min(60, int(target_fps)))
+            v_steps.append(f"fps={clamped_fps}")
 
     v_line = f"[{v_in}]" + ",".join(v_steps) + f"[{v_out}]"
 

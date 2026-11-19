@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
 from app.core import config as cfg
+from app.services.analyzer import transcriber
 from app.services.analyzer.transcriber import transcribe_video
 from app.services.renderer.ffmpeg_runner import _get_filter_script_flag
 from app.services.renderer.subtitle_ass import format_ass_filter_path, generate_ass_file
+from app.services.tracker import yolo_tracker
+from app.services.tracker.yolo_tracker import track_clip_subject
 
 
 def test_bug01_cross_platform_ffmpeg_paths(monkeypatch, tmp_path: Path) -> None:
@@ -106,5 +112,106 @@ async def test_bug03_ass_path_with_apostrophe_and_font_comma(tmp_path: Path) -> 
     )
     assert proc.returncode == 0, proc.stderr
     assert out_mp4.exists() and out_mp4.stat().st_size > 0
+
+
+@pytest.mark.asyncio
+async def test_bug04_gpu_to_thread_cancellation_waits_for_worker_cleanup(
+    monkeypatch, tmp_path: Path
+) -> None:
+    gpu_sem = asyncio.Semaphore(1)
+    worker_started = threading.Event()
+    worker_cleaned_up = threading.Event()
+    wav_existed_during_cleanup = False
+
+    async def fake_extract(_video: Path, wav_path: Path, **_kwargs) -> None:
+        wav_path.write_bytes(b"RIFF0000WAVE")
+
+    def slow_transcribe_sync(
+        wav_path: Path,
+        _duration: float,
+        _model_size: str,
+        _device: str,
+        _compute_type: str,
+        _language: str,
+        _loop: asyncio.AbstractEventLoop,
+        _on_progress,
+        cancel_event: asyncio.Event | None,
+    ):
+        nonlocal wav_existed_during_cleanup
+        worker_started.set()
+        try:
+            while not (cancel_event and cancel_event.is_set()):
+                time.sleep(0.02)
+            time.sleep(0.08)
+            wav_existed_during_cleanup = wav_path.exists()
+            raise asyncio.CancelledError("cancelled")
+        finally:
+            worker_cleaned_up.set()
+
+    monkeypatch.setattr(transcriber, "_extract_wav_16k", fake_extract)
+    monkeypatch.setattr(transcriber, "_transcribe_sync", slow_transcribe_sync)
+
+    cancel_evt = asyncio.Event()
+
+    async def run_whisper() -> None:
+        async with gpu_sem:
+            await transcribe_video(
+                video_path=tmp_path / "dummy.mp4",
+                duration=5.0,
+                has_audio=True,
+                cancel_event=cancel_evt,
+            )
+
+    task = asyncio.create_task(run_whisper())
+    while not worker_started.is_set():
+        await asyncio.sleep(0.01)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Semaphore must ONLY be released AFTER worker thread finished cleanup & WAV still existed during cleanup
+    assert worker_cleaned_up.is_set()
+    assert wav_existed_during_cleanup is True
+    assert not gpu_sem.locked()
+
+    # Same verification for track_clip_subject
+    yolo_started = threading.Event()
+    yolo_cleaned = threading.Event()
+
+    def slow_track_sync(*args):
+        c_evt = args[-1]
+        yolo_started.set()
+        try:
+            while not (c_evt and c_evt.is_set()):
+                time.sleep(0.02)
+            time.sleep(0.08)
+            raise asyncio.CancelledError("cancelled")
+        finally:
+            yolo_cleaned.set()
+
+    monkeypatch.setattr(yolo_tracker, "_track_clip_sync", slow_track_sync)
+    y_cancel = asyncio.Event()
+
+    async def run_yolo() -> None:
+        async with gpu_sem:
+            await track_clip_subject(
+                video_path=tmp_path / "dummy.mp4",
+                clip_start=0.0,
+                clip_end=3.0,
+                cancel_event=y_cancel,
+            )
+
+    ytask = asyncio.create_task(run_yolo())
+    while not yolo_started.is_set():
+        await asyncio.sleep(0.01)
+
+    ytask.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await ytask
+
+    assert yolo_cleaned.is_set()
+    assert not gpu_sem.locked()
+
 
 

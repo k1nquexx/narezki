@@ -79,7 +79,8 @@
 
 ---
 
-### [BUG-04] `CRITICAL` — Гонка GPU-семафора и VRAM при отмене задач Whisper / YOLOv8 (`asyncio.to_thread`)
+### [BUG-04] [FIXED] `CRITICAL` — Гонка GPU-семафора и VRAM при отмене задач Whisper / YOLOv8 (`asyncio.to_thread`)
+- **Статус:** `[FIXED]` — добавлен `run_cancellable_thread()` в `cuda_env.py` и применён в `transcriber.py` и `yolo_tracker.py` (кооперативное ожидание завершения рабочего потока и освобождения VRAM/WAV до выхода из `gpu_semaphore`), подтверждено тестом `test_bug04_gpu_to_thread_cancellation_waits_for_worker_cleanup`.
 - **Файл и строка:** `backend/app/core/queue_manager.py:214-223`, `backend/app/services/analyzer/pipeline.py:93-107`, `backend/app/services/renderer/handlers.py:53-66`, `backend/app/services/analyzer/transcriber.py:235-248`
 - **Суть проблемы:** `QueueManager.cancel_job()` вызывает `task.cancel()` для `handler_task`. Когда хендлер находится на `await asyncio.to_thread(_transcribe_sync, ...)` или `await asyncio.to_thread(_track_clip_sync, ...)`, отмена таска в Python **не прерывает** поток в threadpool — `await asyncio.to_thread(...)` немедленно выбрасывает `asyncio.CancelledError` в event loop. В результате:
   1. `async with ctx.gpu_semaphore:` освобождает GPU-семафор, пока старый поток всё ещё держит модель Whisper/YOLO в VRAM и продолжает вычисления на GPU.

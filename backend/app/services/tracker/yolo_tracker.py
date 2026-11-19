@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Optional
 import cv2
 
 from ...core.config import MODELS_DIR
-from ...core.cuda_env import release_vram, setup_cuda_dlls
+from ...core.cuda_env import release_vram, run_cancellable_thread, setup_cuda_dlls
 from .smoother import smooth_trajectory
 
 logger = logging.getLogger("narezki.tracker")
@@ -228,7 +228,8 @@ async def track_clip_subject(
 ) -> dict[str, Any]:
     """Track primary character/person in the clip using YOLOv8 on GPU and smooth trajectory."""
     loop = asyncio.get_running_loop()
-    return await asyncio.to_thread(
+    eff_cancel = cancel_event if cancel_event is not None else asyncio.Event()
+    return await run_cancellable_thread(
         _track_clip_sync,
         video_path,
         clip_start,
@@ -240,5 +241,6 @@ async def track_clip_subject(
         scene_cuts or [],
         loop,
         on_progress,
-        cancel_event,
+        eff_cancel,
+        cancel_event=eff_cancel,
     )

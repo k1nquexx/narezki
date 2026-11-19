@@ -189,6 +189,28 @@ async def release_vram_async(stage: str = "cleanup") -> dict[str, Any]:
     return await asyncio.to_thread(release_vram, stage)
 
 
+async def run_cancellable_thread(
+    func: Callable[..., Any],
+    *args: Any,
+    cancel_event: Optional[asyncio.Event] = None,
+) -> Any:
+    """Run blocking work in a thread pool and wait for cooperative exit on cancellation."""
+    fut = asyncio.ensure_future(asyncio.to_thread(func, *args))
+    try:
+        return await asyncio.shield(fut)
+    except asyncio.CancelledError:
+        if cancel_event is not None:
+            cancel_event.set()
+        while not fut.done():
+            try:
+                await asyncio.shield(fut)
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                break
+        raise
+
+
 @contextmanager
 def sync_vram_guard(stage_name: str) -> Generator[None, None, None]:
     """Synchronous VRAM guard ensuring cleanup on exit."""

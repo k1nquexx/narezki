@@ -4,11 +4,12 @@ import asyncio
 import logging
 import sys
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 from ...core.config import MODELS_DIR, TEMP_DIR, get_ffmpeg_path
-from ...core.cuda_env import release_vram, setup_cuda_dlls
+from ...core.cuda_env import release_vram, run_cancellable_thread, setup_cuda_dlls
 from ...core.queue_manager import JobCancelledError
 
 logger = logging.getLogger("narezki.whisper")
@@ -68,6 +69,13 @@ async def _extract_wav_16k(
         if proc.returncode != 0 or not wav_path.exists():
             err = stderr.decode("utf-8", errors="replace").strip()
             raise RuntimeError(f"Не удалось извлечь аудиодорожку для Whisper: {err}")
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            with suppress(Exception):
+                proc.kill()
+            with suppress(Exception):
+                await proc.wait()
+        raise
     finally:
         if unregister_proc:
             unregister_proc(proc)
@@ -236,6 +244,7 @@ async def transcribe_video(
 
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     wav_path = TEMP_DIR / f"whisper_{uuid.uuid4().hex[:10]}.wav"
+    eff_cancel = cancel_event if cancel_event is not None else asyncio.Event()
 
     try:
         if on_progress:
@@ -243,12 +252,12 @@ async def transcribe_video(
         await _extract_wav_16k(
             video_path,
             wav_path,
-            cancel_event=cancel_event,
+            cancel_event=eff_cancel,
             register_proc=register_proc,
             unregister_proc=unregister_proc,
         )
         loop = asyncio.get_running_loop()
-        return await asyncio.to_thread(
+        return await run_cancellable_thread(
             _transcribe_sync,
             wav_path,
             duration,
@@ -258,7 +267,9 @@ async def transcribe_video(
             language,
             loop,
             on_progress,
-            cancel_event,
+            eff_cancel,
+            cancel_event=eff_cancel,
         )
     finally:
-        wav_path.unlink(missing_ok=True)
+        with suppress(OSError):
+            wav_path.unlink(missing_ok=True)

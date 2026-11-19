@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Optional
 
@@ -7,7 +8,7 @@ from ...core.config import EXPORTS_DIR, get_project_dir
 from ...core.cuda_env import vram_guard
 from ...core.database import AsyncSessionLocal, load_settings
 from ...core.models import AdPreset, BackgroundAsset, Clip, Project, SubtitlePreset
-from ...core.queue_manager import JobContext, QueueManager
+from ...core.queue_manager import JobCancelledError, JobContext, QueueManager
 from ...core.schemas import ClipOut
 from ...core.ws_manager import ws_manager
 from ..tracker.yolo_tracker import track_clip_subject
@@ -17,6 +18,30 @@ from .ffmpeg_runner import (
     render_clip,
     sanitize_filename,
 )
+
+
+async def _restore_clip_status_on_cancel(clip_id: str, project_id: str) -> None:
+    restored = "draft"
+    preview_path: Optional[str] = None
+    export_path: Optional[str] = None
+    async with AsyncSessionLocal() as session:
+        c = await session.get(Clip, clip_id)
+        if c is not None:
+            if c.export_path and Path(c.export_path).exists():
+                restored = "exported"
+                export_path = c.export_path
+            elif c.preview_path and Path(c.preview_path).exists():
+                restored = "rendered"
+                preview_path = c.preview_path
+            c.status = restored
+            await session.commit()
+    await ws_manager.emit_clip_update(
+        clip_id,
+        project_id,
+        restored,
+        preview_path=preview_path,
+        export_path=export_path,
+    )
 
 
 async def _ensure_clip_tracking(
@@ -170,8 +195,8 @@ async def handle_basic_cut(ctx: JobContext) -> dict[str, Any]:
     async def _progress(pct: float, msg: str) -> None:
         await ctx.update_progress(pct, "render", msg)
 
-    async with ctx.render_semaphore:
-        try:
+    try:
+        async with ctx.render_semaphore:
             await render_basic_cut(
                 source_path=source_path,
                 start_time=start_time,
@@ -193,14 +218,17 @@ async def handle_basic_cut(ctx: JobContext) -> dict[str, Any]:
                     await session.commit()
             await ws_manager.emit_clip_update(clip_id, project_id, "rendered", preview_path=str(out_path))
             return {"clip_id": clip_id, "preview_path": str(out_path)}
-        except Exception:
-            async with AsyncSessionLocal() as session:
-                clip = await session.get(Clip, clip_id)
-                if clip is not None:
-                    clip.status = "error"
-                    await session.commit()
-            await ws_manager.emit_clip_update(clip_id, project_id, "error")
-            raise
+    except (JobCancelledError, asyncio.CancelledError):
+        await _restore_clip_status_on_cancel(clip_id, project_id)
+        raise
+    except Exception:
+        async with AsyncSessionLocal() as session:
+            clip = await session.get(Clip, clip_id)
+            if clip is not None:
+                clip.status = "error"
+                await session.commit()
+        await ws_manager.emit_clip_update(clip_id, project_id, "error")
+        raise
 
 
 async def handle_track_clip(ctx: JobContext) -> dict[str, Any]:
@@ -235,6 +263,9 @@ async def handle_track_clip(ctx: JobContext) -> dict[str, Any]:
             f"YOLOv8 трекинг завершён: {len((track_data or {}).get('points', []))} ключевых точек"
         )
         return {"clip_id": clip_id, "points_count": len((track_data or {}).get("points", []))}
+    except (JobCancelledError, asyncio.CancelledError):
+        await _restore_clip_status_on_cancel(clip_id, project.id)
+        raise
     except Exception:
         async with AsyncSessionLocal() as session:
             c = await session.get(Clip, clip_id)
@@ -353,6 +384,9 @@ async def _render_or_export_single(
             "output_path": str(out_mp4),
             "txt_path": str(txt_path) if txt_path else None,
         }
+    except (JobCancelledError, asyncio.CancelledError):
+        await _restore_clip_status_on_cancel(clip_id, project.id)
+        raise
     except Exception:
         async with AsyncSessionLocal() as session:
             c = await session.get(Clip, clip_id)

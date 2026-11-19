@@ -10,9 +10,11 @@ from pathlib import Path
 import pytest
 
 from app.core import config as cfg
+from app.core.queue_manager import JobCancelledError, JobContext
 from app.services.analyzer import transcriber
 from app.services.analyzer.transcriber import transcribe_video
 from app.services.ingest.ffprobe_utils import probe_media
+from app.services.renderer import handlers as render_handlers
 from app.services.renderer.ad_injector import (
     build_overlay_input_args,
     build_video_ad_splice_filtergraph,
@@ -289,6 +291,100 @@ async def test_bug06_anticid_fps_and_midroll_scaling(fixtures_dir: Path, tmp_pat
     meta = await probe_media(out_mp4)
     assert meta["fps"] == pytest.approx(30.0, abs=0.2)
     assert 6.6 <= meta["duration"] <= 7.0
+
+
+@pytest.mark.asyncio
+async def test_bug07_clip_status_restored_on_cancel(
+    api_client, fixtures_dir: Path, monkeypatch, tmp_path: Path
+) -> None:
+    sample = fixtures_dir / "sample_1080p.mp4"
+    imp = await api_client.post(
+        "/api/projects/import-local",
+        json={"file_path": str(sample), "title": "Bug07 Cancel Status"},
+    )
+    assert imp.status_code == 200
+    proj_id = imp.json()["project"]["id"]
+    from tests.test_m1_m2_ingest import _wait_job
+
+    await _wait_job(api_client, imp.json()["job"]["id"])
+
+    # Create a clip and set an existing preview file on disk to test restoration to "rendered"
+    c_resp = await api_client.post(
+        "/api/clips",
+        json={
+            "project_id": proj_id,
+            "title": "Clip Cancel Test",
+            "start_time": 0.0,
+            "end_time": 3.0,
+            "crop_mode": "cinema_blur",
+        },
+    )
+    assert c_resp.status_code == 200
+    clip_id = c_resp.json()["id"]
+
+    existing_preview = tmp_path / "existing_prev.mp4"
+    existing_preview.write_bytes(b"mp4")
+
+    from app.core.database import AsyncSessionLocal
+    from app.core.models import Clip
+
+    async with AsyncSessionLocal() as session:
+        c = await session.get(Clip, clip_id)
+        assert c is not None
+        c.preview_path = str(existing_preview)
+        c.status = "rendered"
+        await session.commit()
+
+    async def fail_with_job_cancel(**_kwargs):
+        raise JobCancelledError("cancelled")
+
+    monkeypatch.setattr(render_handlers, "render_clip", fail_with_job_cancel)
+    ctx = JobContext(
+        job_id="job-cancel-1",
+        job_type="render_preview",
+        project_id=proj_id,
+        clip_id=clip_id,
+        payload={},
+        cancel_event=asyncio.Event(),
+        gpu_semaphore=asyncio.Semaphore(1),
+        render_semaphore=asyncio.Semaphore(1),
+    )
+    with pytest.raises(JobCancelledError):
+        await render_handlers.handle_render_preview(ctx)
+
+    after_1 = (await api_client.get(f"/api/clips/{clip_id}")).json()
+    assert after_1["status"] == "rendered"
+
+    # Now verify asyncio.CancelledError on track_clip when no preview exists restores to "draft"
+    async with AsyncSessionLocal() as session:
+        c = await session.get(Clip, clip_id)
+        assert c is not None
+        c.preview_path = None
+        c.status = "draft"
+        await session.commit()
+
+    async def fail_track_cancel(**_kwargs):
+        raise asyncio.CancelledError("cancelled")
+
+    monkeypatch.setattr(render_handlers, "track_clip_subject", fail_track_cancel)
+    ctx2 = JobContext(
+        job_id="job-cancel-2",
+        job_type="track_clip",
+        project_id=proj_id,
+        clip_id=clip_id,
+        payload={},
+        cancel_event=asyncio.Event(),
+        gpu_semaphore=asyncio.Semaphore(1),
+        render_semaphore=asyncio.Semaphore(1),
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await render_handlers.handle_track_clip(ctx2)
+
+    after_2 = (await api_client.get(f"/api/clips/{clip_id}")).json()
+    assert after_2["status"] == "draft"
+
+    await api_client.delete(f"/api/projects/{proj_id}")
+
 
 
 

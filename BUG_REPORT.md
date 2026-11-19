@@ -114,7 +114,8 @@
 
 ---
 
-### [BUG-07] `MAJOR` — Залипание статуса клипа (`rendering` / `tracking`) или ложный статус `error` при отмене задачи
+### [BUG-07] [FIXED] `MAJOR` — Залипание статуса клипа (`rendering` / `tracking`) или ложный статус `error` при отмене задачи
+- **Статус:** `[FIXED]` — добавлен хелпер `_restore_clip_status_on_cancel()` и явный перехват `except (JobCancelledError, asyncio.CancelledError):` в `handle_basic_cut`, `handle_track_clip` и `_render_or_export_single` (`handlers.py`). Подтверждено тестом `test_bug07_clip_status_restored_on_cancel`.
 - **Файл и строка:** `backend/app/services/renderer/handlers.py:196-203, 238-245, 356-363`
 - **Суть проблемы:** Хендлеры `handle_basic_cut`, `handle_track_clip` и `_render_or_export_single` перехватывают только `except Exception:`. В Python 3.11 `asyncio.CancelledError` наследуется от `BaseException`, а `JobCancelledError` — от `Exception`. При отмене задачи:
   - Если выброшен `asyncio.CancelledError` — блок `except` не срабатывает, и клип навсегда остаётся в статусе `"rendering"` или `"tracking"` в БД и UI.

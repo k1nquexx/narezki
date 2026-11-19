@@ -53,7 +53,8 @@
 
 ---
 
-### [BUG-02] `CRITICAL` — Краш `faster-whisper` при `device="cpu"` и `compute_type="float16"` (нет фолбэка на `int8`)
+### [BUG-02] [FIXED] `CRITICAL` — Краш `faster-whisper` при `device="cpu"` и `compute_type="float16"` (нет фолбэка на `int8`)
+- **Статус:** `[FIXED]` — добавлена проверка `torch.cuda.is_available()` и автоматический фолбэк на `int8` для `cpu` в `transcriber.py`, подтверждено тестом `test_bug02_whisper_cpu_float16_fallback_to_int8`.
 - **Файл и строка:** `backend/app/services/analyzer/transcriber.py:92-97`
 - **Суть проблемы:** Список попыток формируется так:
   ```python

@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from app.core import config as cfg
+from app.services.analyzer.transcriber import transcribe_video
 
 
 def test_bug01_cross_platform_ffmpeg_paths(monkeypatch, tmp_path: Path) -> None:
@@ -39,3 +42,20 @@ def test_bug01_cross_platform_ffmpeg_paths(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cfg.os, "access", lambda path, mode: Path(path) in (unix_ffmpeg, unix_ffprobe))
     assert cfg.get_ffmpeg_path() == str(unix_ffmpeg)
     assert cfg.get_ffprobe_path() == str(unix_ffprobe)
+
+
+@pytest.mark.asyncio
+async def test_bug02_whisper_cpu_float16_fallback_to_int8(fixtures_dir: Path) -> None:
+    sample = fixtures_dir / "sample_1080p.mp4"
+    res = await transcribe_video(
+        video_path=sample,
+        duration=12.0,
+        has_audio=True,
+        model_size="base",
+        device="cpu",
+        compute_type="float16",
+    )
+    assert res["device"] == "cpu"
+    assert res["compute_type"] == "int8"
+    assert isinstance(res["segments"], list)
+

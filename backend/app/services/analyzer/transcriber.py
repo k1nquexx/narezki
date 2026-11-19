@@ -89,11 +89,27 @@ def _transcribe_sync(
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    attempts: list[tuple[str, str]] = [(device, compute_type)]
-    if device == "cuda" and compute_type == "float16":
-        attempts.append(("cuda", "int8_float16"))
+    cuda_ok = False
     if device == "cuda":
+        try:
+            import torch
+
+            cuda_ok = bool(torch.cuda.is_available())
+        except Exception:
+            cuda_ok = False
+
+    eff_device = device if (device != "cuda" or cuda_ok) else "cpu"
+    attempts: list[tuple[str, str]] = []
+    if eff_device == "cuda":
+        attempts.append(("cuda", compute_type))
+        if compute_type == "float16":
+            attempts.append(("cuda", "int8_float16"))
         attempts.append(("cpu", "int8"))
+    else:
+        cpu_ct = "int8" if compute_type in ("float16", "int8_float16") else compute_type
+        attempts.append(("cpu", cpu_ct))
+        if cpu_ct != "int8":
+            attempts.append(("cpu", "int8"))
 
     last_err: Exception | None = None
     used_device = device

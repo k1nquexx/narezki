@@ -160,6 +160,11 @@ async def run_ffmpeg_with_progress(
             tail = "\n".join(stderr_lines[-15:])
             raise RuntimeError(f"FFmpeg завершился с кодом {rc}:\n{tail}")
     finally:
+        if proc.returncode is None:
+            with suppress(Exception):
+                proc.kill()
+            with suppress(Exception):
+                await proc.wait()
         if not stderr_task.done():
             stderr_task.cancel()
         with suppress(asyncio.CancelledError):

@@ -102,7 +102,7 @@
 
 ---
 
-### [BUG-26] `MAJOR` — Утечка дочерних процессов (`ffmpeg` / `yt-dlp` / `streamlink`) при таймаутах и `asyncio.CancelledError`
+### [BUG-26] `MAJOR` `[FIXED]` — Утечка дочерних процессов (`ffmpeg` / `yt-dlp` / `streamlink`) при таймаутах и `asyncio.CancelledError`
 - **Файл и строка:** `backend/app/services/live/live_watcher.py:156-172, 300-335, 492-501`, `backend/app/services/renderer/ffmpeg_runner.py:131-168`, `backend/app/services/analyzer/audio_peaks.py:82-120`, `backend/app/services/ingest/proxy.py:140-171`
 - **Суть проблемы:**
   1. В `live_watcher.py` (`_run_yt_dlp_json`, `resolve_stream_urls`, `extract_window`) используется `await asyncio.wait_for(proc.communicate(), timeout=...)`. При срабатывании `asyncio.TimeoutError` корутина `communicate()` отменяется, но сам процесс `proc` **не убивается и не ожидается** (`proc.kill()` / `await proc.wait()` отсутствуют) — зависшие процессы `yt-dlp`, `streamlink` и `ffmpeg` остаются висеть в системе.

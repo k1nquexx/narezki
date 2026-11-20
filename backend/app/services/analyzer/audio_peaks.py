@@ -111,6 +111,11 @@ async def analyze_audio_peaks(
         await stderr_task
         await proc.wait()
     finally:
+        if proc.returncode is None:
+            with suppress(Exception):
+                proc.kill()
+            with suppress(Exception):
+                await proc.wait()
         if not stderr_task.done():
             stderr_task.cancel()
         with suppress(asyncio.CancelledError):

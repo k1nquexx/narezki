@@ -152,6 +152,7 @@ async def _run_yt_dlp_json(target_url: str, timeout: float = 20.0) -> Optional[d
         "1",
         target_url,
     ]
+    proc: Optional[asyncio.subprocess.Process] = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -168,7 +169,19 @@ async def _run_yt_dlp_json(target_url: str, timeout: float = 20.0) -> Optional[d
                 data = json.loads(line)
                 if isinstance(data, dict):
                     return data
+    except asyncio.CancelledError:
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+        raise
     except Exception as exc:
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
         logger.debug("yt-dlp metadata probe failed for %s: %s", target_url, exc)
     return None
 
@@ -296,6 +309,7 @@ async def resolve_stream_urls(stream_target: str, timeout: float = 25.0) -> tupl
         "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
         stream_target,
     ]
+    proc: Optional[asyncio.subprocess.Process] = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -310,13 +324,26 @@ async def resolve_stream_urls(stream_target: str, timeout: float = 25.0) -> tupl
                 return urls[0], urls[1]
             if len(urls) == 1:
                 return urls[0], None
+    except asyncio.CancelledError:
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+        raise
     except Exception as exc:
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
         logger.debug("yt-dlp -g failed for %s: %s", stream_target, exc)
 
     streamlink_bin = shutil.which("streamlink")
     if streamlink_bin:
+        sl_proc: Optional[asyncio.subprocess.Process] = None
         try:
-            proc = await asyncio.create_subprocess_exec(
+            sl_proc = await asyncio.create_subprocess_exec(
                 streamlink_bin,
                 "--stream-url",
                 stream_target,
@@ -325,12 +352,24 @@ async def resolve_stream_urls(stream_target: str, timeout: float = 25.0) -> tupl
                 stderr=asyncio.subprocess.PIPE,
                 **_subprocess_kwargs(),
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            if proc.returncode == 0 and stdout:
+            stdout, _ = await asyncio.wait_for(sl_proc.communicate(), timeout=timeout)
+            if sl_proc.returncode == 0 and stdout:
                 line = stdout.decode("utf-8", errors="replace").strip().splitlines()[-1].strip()
                 if line.startswith("http"):
                     return line, None
+        except asyncio.CancelledError:
+            if sl_proc is not None and sl_proc.returncode is None:
+                with contextlib.suppress(Exception):
+                    sl_proc.kill()
+                with contextlib.suppress(Exception):
+                    await sl_proc.wait()
+            raise
         except Exception as exc:
+            if sl_proc is not None and sl_proc.returncode is None:
+                with contextlib.suppress(Exception):
+                    sl_proc.kill()
+                with contextlib.suppress(Exception):
+                    await sl_proc.wait()
             logger.debug("streamlink fallback failed for %s: %s", stream_target, exc)
 
     return None, None

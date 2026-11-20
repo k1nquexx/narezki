@@ -163,6 +163,11 @@ async def generate_proxy(
             await stderr_task
             rc = await proc.wait()
         finally:
+            if proc.returncode is None:
+                with suppress(Exception):
+                    proc.kill()
+                with suppress(Exception):
+                    await proc.wait()
             if not stderr_task.done():
                 stderr_task.cancel()
             with suppress(asyncio.CancelledError):

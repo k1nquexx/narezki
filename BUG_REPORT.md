@@ -111,7 +111,7 @@
 
 ---
 
-### [BUG-27] `MAJOR` — Краш Live Monitor на потоке без аудиодорожки и молчаливое проглатывание всех ошибок авто-клиппинга
+### [BUG-27] `MAJOR` `[FIXED]` — Краш Live Monitor на потоке без аудиодорожки и молчаливое проглатывание всех ошибок авто-клиппинга
 - **Файл и строка:** `backend/app/services/live/live_watcher.py:667-683, 928-941`
 - **Суть проблемы:**
   1. В `LiveStreamSession._run()` FFmpeg всегда запускается с двумя выходами: сегментный MPEG-TS буфер и сырой PCM-поток (`-vn -ac 1 -ar 16000 -f s16le pipe:1`). Подтверждено E2E-прогоном: если стрим (или тестовый источник) не содержит аудиодорожки, FFmpeg немедленно падает с `Output file does not contain any stream / Error opening output file pipe:1`.

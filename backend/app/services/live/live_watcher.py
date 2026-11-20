@@ -25,6 +25,7 @@ from sqlalchemy import select
 from ...core.config import (
     LIVE_BUFFER_DIR,
     get_ffmpeg_path,
+    get_ffprobe_path,
     get_project_dir,
 )
 from ...core.database import AsyncSessionLocal, load_settings
@@ -373,6 +374,112 @@ async def resolve_stream_urls(stream_target: str, timeout: float = 25.0) -> tupl
             logger.debug("streamlink fallback failed for %s: %s", stream_target, exc)
 
     return None, None
+
+
+async def _probe_stream_has_audio(url: str, timeout: float = 8.0) -> bool:
+    """Check via ffprobe whether a stream/media URL contains an audio track.
+
+    Returns True by default if probing times out or fails (to avoid dropping audio on slow live HLS).
+    Returns False only when ffprobe succeeds and confirms there are no audio streams.
+    """
+    try:
+        ffprobe = get_ffprobe_path()
+    except Exception:
+        return True
+    cmd = [
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "csv=p=0",
+        url,
+    ]
+    proc: Optional[asyncio.subprocess.Process] = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **_subprocess_kwargs(),
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode == 0:
+            return b"audio" in stdout.lower()
+    except asyncio.CancelledError:
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+        raise
+    except Exception:
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+    return True
+
+
+def build_live_ffmpeg_cmd(
+    ffmpeg: str,
+    video_url: str,
+    audio_url: Optional[str],
+    has_audio: bool,
+    seg_pattern: str,
+    csv_path: str,
+    segment_seconds: int,
+    include_reconnect: bool = True,
+) -> list[str]:
+    """Build the FFmpeg command for LiveStreamSession ring buffer (+ optional PCM audio pipe)."""
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "warning"]
+    reconnect_args = (
+        [
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+        ]
+        if include_reconnect and video_url.startswith(("http://", "https://"))
+        else []
+    )
+    cmd.extend([*reconnect_args, "-i", video_url])
+    if audio_url:
+        audio_reconnect = (
+            [
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+            ]
+            if include_reconnect and audio_url.startswith(("http://", "https://"))
+            else []
+        )
+        cmd.extend([*audio_reconnect, "-i", audio_url, "-map", "0:v:0", "-map", "1:a:0"])
+
+    # Output 1: rolling MPEG-TS ring buffer
+    cmd.extend([
+        "-c", "copy",
+        "-f", "segment",
+        "-segment_time", str(segment_seconds),
+        "-segment_format", "mpegts",
+        "-segment_list", csv_path,
+        "-segment_list_type", "csv",
+        "-reset_timestamps", "1",
+        seg_pattern,
+    ])
+
+    # Output 2: live 16kHz mono s16le PCM to stdout for audio energy spike detection (only if audio exists)
+    if has_audio:
+        if audio_url:
+            cmd.extend(["-map", "1:a:0"])
+        else:
+            cmd.extend(["-map", "0:a:0"])
+        cmd.extend(["-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1"])
+
+    return cmd
 
 
 @dataclass
@@ -763,32 +870,19 @@ class LiveStreamSession:
             seg_pattern = str(self.buffer_dir / "seg_%06d.ts")
             csv_path = str(self.buffer_manager.playlist_path)
 
-            cmd = [ffmpeg, "-hide_banner", "-loglevel", "warning"]
-            reconnect_args = [
-                "-reconnect", "1",
-                "-reconnect_streamed", "1",
-                "-reconnect_delay_max", "5",
-            ]
-            cmd.extend([*reconnect_args, "-i", video_url])
-            if audio_url:
-                cmd.extend([*reconnect_args, "-i", audio_url, "-map", "0:v:0", "-map", "1:a:0"])
+            has_audio = True if audio_url else await _probe_stream_has_audio(video_url)
+            if not has_audio:
+                logger.info("Live Monitor: поток %s без аудиодорожки — отключаем PCM-анализ", ch.name)
 
-            # Output 1: rolling MPEG-TS ring buffer
-            cmd.extend([
-                "-c", "copy",
-                "-f", "segment",
-                "-segment_time", str(self.buffer_manager.segment_seconds),
-                "-segment_format", "mpegts",
-                "-segment_list", csv_path,
-                "-segment_list_type", "csv",
-                "-reset_timestamps", "1",
-                seg_pattern,
-            ])
-
-            # Output 2: live 16kHz mono s16le PCM to stdout for audio energy spike detection
-            if audio_url:
-                cmd.extend(["-map", "1:a:0"])
-            cmd.extend(["-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1"])
+            cmd = build_live_ffmpeg_cmd(
+                ffmpeg=ffmpeg,
+                video_url=video_url,
+                audio_url=audio_url,
+                has_audio=has_audio,
+                seg_pattern=seg_pattern,
+                csv_path=csv_path,
+                segment_seconds=self.buffer_manager.segment_seconds,
+            )
 
             self._proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -1037,8 +1131,7 @@ class LiveStreamSession:
             for trig in ready:
                 if (latest_buf_sec - self._last_clip_sec) < ch.min_clip_gap_sec:
                     continue
-                self._last_clip_sec = latest_buf_sec
-                with contextlib.suppress(Exception):
+                try:
                     await self.capture_clip_window(
                         start_sec=trig.start_sec,
                         end_sec=trig.end_sec,
@@ -1046,6 +1139,14 @@ class LiveStreamSession:
                         score=trig.score,
                         chat_spike=trig.chat_spike,
                         audio_ratio=trig.audio_ratio,
+                    )
+                    self._last_clip_sec = latest_buf_sec
+                except Exception as exc:
+                    logger.warning("Live auto-clip capture failed for %s: %s", self.channel_id, exc)
+                    await ws_manager.log(
+                        f"Live Monitor [{ch.name}]: ошибка авто-нарезки клипа — {exc}",
+                        level="warning",
+                        stage="live",
                     )
 
             if tick % 2 == 0:

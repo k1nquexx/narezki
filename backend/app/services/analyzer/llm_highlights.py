@@ -173,10 +173,47 @@ def _extract_json_payload(raw_text: str) -> dict[str, Any]:
     return data
 
 
+_STRONG_AD_PATTERNS = [
+    re.compile(r"промокод\w*", re.IGNORECASE),
+    re.compile(r"ссылк\w*\s+в\s+(описани\w*|закреп\w*|профил\w*)", re.IGNORECASE),
+    re.compile(r"по\s+ссылк\w*\s+(ниже|в\s+описани\w*|в\s+закреп\w*)", re.IGNORECASE),
+    re.compile(r"спонсор\w*\s+(выпуск\w*|видео|ролик\w*|сегодняшн\w*)", re.IGNORECASE),
+    re.compile(r"рекламн\w*\s+интеграц\w*", re.IGNORECASE),
+    re.compile(r"пополнени\w*\s+(steam|стим|playstation|xbox|баланс|игр)", re.IGNORECASE),
+    re.compile(r"\b(play\s*rock|playrock|kupikod|купикод|donatov|funpay|nordvpn|surfshark)\b", re.IGNORECASE),
+    re.compile(r"\b(promo\s*code|use\s+code|link\s+in\s+(the\s+)?description|sponsored\s+by)\b", re.IGNORECASE),
+]
+
+_WEAK_AD_PATTERNS = [
+    re.compile(r"\b(скидк\w*|кэшбэк\w*|кешбэк\w*|выгодн\w*|предзаказ\w*|пополнени\w*)\b", re.IGNORECASE),
+    re.compile(r"\b(ценн\w*\s+приз\w*|розыгрыш\w*|фриспин\w*|букмекер\w*|казино|бесплатн\w*\s+доставк\w*)\b", re.IGNORECASE),
+    re.compile(r"\b(подпис\w*\s+на\s+(канал|телеграм|тг|telegram)|ставь\w*\s+лайк\w*|жмите\s+колокольчик)\b", re.IGNORECASE),
+    re.compile(r"\b(playstation|xbox|steam|стим|подписк\w*\s+ps|геймпасс|game\s*pass)\b", re.IGNORECASE),
+    re.compile(r"\b(за\s+покупк\w*|при\s+покупк\w*|успей\w*\s+забрать|переходи\w*\s+по)\b", re.IGNORECASE),
+]
+
+
+def is_sponsor_or_ad_text(text: str) -> bool:
+    """Detect Russian/English sponsor reads, ad integrations, and promo CTAs in transcript text."""
+    if not text or len(text) < 12:
+        return False
+    for pat in _STRONG_AD_PATTERNS:
+        if pat.search(text):
+            return True
+    weak_hits = sum(1 for pat in _WEAK_AD_PATTERNS if pat.search(text))
+    return weak_hits >= 2
+
+
 def _temporal_iou(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
     inter = max(0.0, min(a_end, b_end) - max(a_start, b_start))
     union = max(a_end, b_end) - min(a_start, b_start)
     return inter / union if union > 0 else 0.0
+
+
+def _overlap_ratio(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
+    inter = max(0.0, min(a_end, b_end) - max(a_start, b_start))
+    min_dur = min(max(0.1, a_end - a_start), max(0.1, b_end - b_start))
+    return inter / min_dur
 
 
 def deduplicate_highlights(items: list[LLMHighlightItem], max_count: int) -> list[LLMHighlightItem]:
@@ -184,7 +221,11 @@ def deduplicate_highlights(items: list[LLMHighlightItem], max_count: int) -> lis
     sorted_items = sorted(items, key=lambda x: x.virality_score, reverse=True)
     kept: list[LLMHighlightItem] = []
     for cand in sorted_items:
-        if any(_temporal_iou(cand.start_time, cand.end_time, k.start_time, k.end_time) > 0.40 for k in kept):
+        if any(
+            _temporal_iou(cand.start_time, cand.end_time, k.start_time, k.end_time) > 0.15
+            or _overlap_ratio(cand.start_time, cand.end_time, k.start_time, k.end_time) > 0.25
+            for k in kept
+        ):
             continue
         kept.append(cand)
         if len(kept) >= max_count:
@@ -198,6 +239,10 @@ SYSTEM_PROMPT = """Ты — элитный продюсер виральных �
 Учитывай ДВА типа контента:
 1. Диалоговые/эмоциональные сцены (сильные фразы, конфликты, неожиданные повороты, панчлайны, реакции стримера).
 2. Экшен-сцены БЕЗ слов (взрывы громкости [AUDIO_SPIKE] + быстрый монтаж [ACTION_MONTAGE] — драки в аниме, перестрелки, эпичные скримеры, кульминации).
+
+СТРОГО ИГНОРИРУЙ:
+- Любые рекламные интеграции, спонсорские вставки, упоминания промокодов, ссылок в описании, пополнений/магазинов/сервисов, розыгрышей и призывов подписаться или поставить лайк. НИКОГДА не выбирай рекламу как хайлайт.
+- Интро, аутро и монотонные переходы без смысла.
 
 Верни СТРОГО валидный JSON-объект без лишнего текста:
 {{
@@ -361,18 +406,26 @@ def analyze_highlights_heuristic(
         ]
         cut_count = sum(1 for c in scenes if t <= c <= end_t)
         speech_segs = [s for s in transcript if float(s["end"]) >= t and float(s["start"]) <= end_t]
+        window_text = " ".join(str(s.get("text", "")).strip() for s in speech_segs)
+        if is_sponsor_or_ad_text(window_text):
+            if end_t >= duration:
+                break
+            t += step
+            continue
+
         speech_words = sum(len(str(s.get("text", "")).split()) for s in speech_segs)
 
         audio_score = max((float(p.get("score", 0.0)) for p in peak_hits), default=0.0)
+        peak_density_bonus = min(12.0, max(0, len(peak_hits) - 1) * 4.0)
         chat_score = max((float(cs.get("score", 0.0)) for cs in chat_hits), default=0.0)
-        action_score = min(40.0, cut_count * 4.5 + len(burst_hits) * 18.0)
-        speech_score = min(35.0, speech_words * 0.65)
+        action_score = min(28.0, cut_count * 3.0 + len(burst_hits) * 14.0)
+        speech_score = min(22.0, speech_words * 0.25)
         total_score = round(
             min(
-                99.0,
+                98.0,
                 max(
                     25.0,
-                    20.0 + audio_score * 0.45 + chat_score * 0.35 + action_score + speech_score,
+                    18.0 + audio_score * 0.35 + peak_density_bonus + chat_score * 0.30 + action_score + speech_score,
                 ),
             ),
             1,

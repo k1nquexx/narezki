@@ -89,7 +89,7 @@
 
 ---
 
-### [BUG-25] `MAJOR` — Кнопка «В Студию» в Live Monitor открывает пустую Студию (`project === null`), а завершение фоновой задачи подменяет клипы чужого проекта
+### [BUG-25] `MAJOR` `[FIXED]` — Кнопка «В Студию» в Live Monitor открывает пустую Студию (`project === null`), а завершение фоновой задачи подменяет клипы чужого проекта
 - **Файл и строка:** `backend/app/services/live/live_watcher.py:1080-1085`, `src/pages/LiveMonitorPage.tsx:256-260`, `src/store/useAppStore.ts:147-161, 395-405`
 - **Суть проблемы:**
   1. `capture_clip_window()` создаёт новый `Project(source_type="live")` в БД, но вызывает только `emit_clip_update` и `emit_live_update`, **не вызывая `emit_project_update`**. В результате массив `projects` в Zustand не содержит нового Live-проекта. Когда пользователь нажимает «В Студию» (`handleOpenClipInStudio`), `ClipStudioPage` ищет `projects.find(p => p.id === selectedProjectId)`, получает `null` и показывает заглушку «Выберите проект» вместо клипа.

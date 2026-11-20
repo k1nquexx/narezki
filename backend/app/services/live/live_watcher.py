@@ -1149,6 +1149,7 @@ class LiveStreamSession:
             )
             job_id = job.id
             self._clips_created += 1
+            await ws_manager.emit_project_update(project_id, "ready")
             await ws_manager.emit_clip_update(clip_id, project_id, "draft")
             await ws_manager.emit_live_update(self.channel_id, self._status, runtime=self.snapshot())
             await ws_manager.log(f"Live-клип создан: {clip_title} (job {job_id})", stage="live", job_id=job_id)

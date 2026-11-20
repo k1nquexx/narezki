@@ -153,8 +153,11 @@ async function ensureRealtimeSubscriptions(set: StoreSet, get: StoreGet): Promis
             job.job_type === "live_process_clip"
           ) {
             const pid = job.project_id || get().selectedProjectId;
-            if (pid) void get().refreshClips(pid);
+            if (pid && pid === get().selectedProjectId) {
+              void get().refreshClips(pid);
+            }
             if (job.job_type === "live_process_clip") {
+              void get().refreshProjects();
               void get().refreshLive();
               void get().refreshPublishing();
             }
@@ -395,6 +398,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   refreshClips: async (projectId) => {
     try {
       const clips = await api.listClips(projectId);
+      if (get().selectedProjectId !== projectId) return;
       const current = get().selectedClipId;
       const nextClip =
         current && clips.some((c) => c.id === current) ? current : clips[0]?.id ?? null;

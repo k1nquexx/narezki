@@ -254,6 +254,10 @@ export function LiveMonitorPage() {
   };
 
   const handleOpenClipInStudio = async (projectId: string, clipId: string) => {
+    const state = useAppStore.getState();
+    if (!state.projects.some((p) => p.id === projectId)) {
+      await state.refreshProjects();
+    }
     await selectProject(projectId);
     selectClip(clipId);
     setActiveTab("studio");

@@ -3,6 +3,7 @@ import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { Layout } from "./components/Layout";
 import { ToastContainer } from "./components/ToastContainer";
 import { ClipStudioPage } from "./pages/ClipStudioPage";
+import { LiveMonitorPage } from "./pages/LiveMonitorPage";
 import { PresetsPage } from "./pages/PresetsPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -45,6 +46,7 @@ export function App() {
       ) : (
         <>
           {activeTab === "projects" && <ProjectsPage />}
+          {activeTab === "live" && <LiveMonitorPage />}
           {activeTab === "studio" && <ClipStudioPage />}
           {activeTab === "presets" && <PresetsPage />}
           {activeTab === "settings" && <SettingsPage />}

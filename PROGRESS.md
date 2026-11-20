@@ -10,6 +10,7 @@
 - [x] **Этап 4: Трекинг YOLOv8 и субтитры `.ass`** — завершён и проверен: `smoother.py` (Kalman/EMA с deadzone и сбросом на склейках), `yolo_tracker.py` (`yolov8n.pt` и кастомные `.pt` веса на CUDA), `crop_filters.py` (`auto_track`, `cinema_blur`, `split_screen`), `subtitle_ass.py` (`.ass` с `\kf` караоке, `word_highlight`, safe-zone отступами и 3-секундным хуком).
 - [x] **Этап 5: Микрореклама, уникализация, UI-студия и батч-экспорт** — завершён и проверен: `ad_injector.py` (видеовклейки `mid_roll`/`outro` с ресайзом 1080×1920 и `loudnorm`, PNG/WebM/GIF оверлеи с alpha `fade-in`/`fade-out`), `anti_cid.py` (микро-зум, цветокоррекция, скорость+питч, очистка метаданных), мастер-рендерер (`-/filter_complex` / `-filter_complex_script`), полная студия `ClipStudioPage`, `PresetsPage` и батч-экспорт `.mp4` + `.txt`.
 - [x] **Этап 6: Оптимизация VRAM, обработка ошибок и верификация** — завершён и проверен: `VRAMGuard` + `gpu_semaphore(1)` + `release_vram()` гарантируют очистку CUDA между Whisper и YOLOv8 (дельта VRAM < 500 МБ), отмена задач завершает дочерние процессы FFmpeg, HTTP Range `206` и защита путей (`403`) проверены.
+- [x] **Этап 7: Live Monitor, Chat Spike Detection и Автопостинг (интеграция PeakCut)** — завершён и проверен: [PEAKCUT_ANALYSIS.md](file:///f:/projects/narezki/PEAKCUT_ANALYSIS.md), `backend/app/services/live/` (`live_watcher.py`, `chat_analyzer.py`, `handlers.py`, `publisher.py`), единый 9:16 пайплайн (`YOLOv8` → `.ass` → реклама → Anti-CID → NVENC), режим `zero_ai` (без LLM), автопостинг в YouTube Shorts / TikTok / Instagram Reels с анти-тенебан интервалами и режимом «Только локальный экспорт» (`local_only`), а также вкладка `Live Monitor` и настройки публикаций во фронтенде.
 
 ---
 
@@ -58,18 +59,19 @@ narezki/
 ├── src-tauri/                 # Tauri v2 (Rust): автозапуск backend/.venv, трей, нативные диалоги, open_in_explorer
 ├── src/                       # React + TypeScript (strict) + Tailwind CSS + Zustand
 │   ├── components/            # Layout, LogDrawer, ToastContainer, VideoPreview916, ClipTimelineEditor, SubtitleCueEditor
-│   ├── pages/                 # ProjectsPage, ClipStudioPage, PresetsPage, SettingsPage
+│   ├── pages/                 # ProjectsPage, LiveMonitorPage, ClipStudioPage, PresetsPage, SettingsPage
 │   ├── store/useAppStore.ts   # Zustand-состояние и обработка WebSocket-событий
 │   └── lib/                   # api.ts, ws.ts, tauri.ts
 ├── backend/                   # Python 3.11+ FastAPI + SQLite (aiosqlite) + asyncio QueueManager
 │   ├── bin/                   # ffmpeg.exe, ffprobe.exe (Windows GPL с NVENC и libass)
 │   ├── app/core/              # cuda_env.py (DLL + VRAMGuard), config.py, models.py, schemas.py, database.py, ws_manager.py, queue_manager.py
-│   ├── app/api/               # system.py, projects.py, clips.py, presets.py, jobs.py, media.py
+│   ├── app/api/               # system.py, projects.py, clips.py, presets.py, jobs.py, media.py, live.py, publishing.py
 │   ├── app/services/ingest/   # ffprobe_utils.py, proxy.py, downloader.py (yt-dlp), handlers.py
 │   ├── app/services/analyzer/ # audio_peaks.py, scene_detect.py, transcriber.py (faster-whisper), llm_highlights.py, pipeline.py
 │   ├── app/services/tracker/  # smoother.py (Kalman/EMA + reset), yolo_tracker.py
-│   └── app/services/renderer/ # encoder_detect.py, crop_filters.py, subtitle_ass.py, ad_injector.py, anti_cid.py, ffmpeg_runner.py
-└── tests/                     # Интеграционные тесты pytest (M1–M6 на реальных синтетических видео)
+│   ├── app/services/renderer/ # encoder_detect.py, crop_filters.py, subtitle_ass.py, ad_injector.py, anti_cid.py, ffmpeg_runner.py
+│   └── app/services/live/     # live_watcher.py, chat_analyzer.py, handlers.py, publisher.py
+└── tests/                     # Интеграционные тесты pytest (M1–M6, регрессии BUG-XX и Live/Publishing)
 ```
 
 ---
@@ -104,6 +106,40 @@ narezki/
 - `GET / POST / POST(/upload) / PATCH / DELETE /api/presets/ads`
 - `GET / POST / POST(/scan-folder) / DELETE /api/presets/backgrounds`
 - `GET /api/media/stream?path=...` — HTTP Range (206) стриминг с валидацией путей.
+
+### Live Monitor & Auto-Posting (`/api/live`, `/api/publishing`)
+- `GET / POST / PATCH / DELETE /api/live/channels` — управление отслеживаемыми каналами Twitch / Kick / YouTube.
+- `POST /api/live/channels/{id}/start`, `/stop`, `/check`, `/clip-now` — запуск/остановка буфера, проверка онлайна и ручная нарезка последних N секунд.
+- `GET /api/live/clips` — живая лента клипов, нарезанных в реальном времени.
+- `GET / POST / PATCH / DELETE /api/publishing/accounts` — подключённые аккаунты (без утечки `credentials_json` в API-ответах).
+- `GET /api/publishing/oauth/{platform}/url` и `/callback` — OAuth2-авторизация YouTube / TikTok / Instagram.
+- `GET /api/publishing/queue`, `POST /api/publishing/enqueue`, `/cancel`, `/retry`, `DELETE` — очередь отложенного постинга.
+- `GET /api/publishing/public/{token}.mp4` — подписанная HMAC-ссылка на экспортированный клип для Instagram Reels.
+- Новые события `WS /ws`: `live_update`, `publish_update`.
+
+---
+
+## Инструкция по настройке Live-мониторинга и автопостинга на Windows
+
+1. **Предусловия (Windows 10/11):**
+   - Используется штатное окружение `backend\.venv` (`yt-dlp`, `httpx`, `websockets`, `numpy`) и бинарники `backend\bin\ffmpeg.exe` / `ffprobe.exe` (при желании можно дополнительно установить `streamlink` в PATH как резервный резолвер потоков). Все фоновые вызовы на Windows запускаются с `CREATE_NO_WINDOW` без всплывающих консолей.
+2. **Подключение стримов во вкладке `Live Monitor`:**
+   - Вставьте ссылку вида `https://www.twitch.tv/channel`, `https://kick.com/channel` или `https://www.youtube.com/@channel/live`.
+   - Выберите размер **кольцевого буфера** (`buffer_minutes`, по умолчанию 20 мин) — хранится в `backend\data\live_buffers\<channel_id>\` в виде 6-секундных `.ts` сегментов; старые сегменты автоматически удаляются.
+   - Выберите режим детекции:
+     - **`Zero-AI (Чат + Аудио пики)`** — работает без LLM-ключей: триггер срабатывает по всплеску уникальных авторов/эмодзи в чате, аудио-скачку RMS dBFS и зрительским командам `!clip` / `клип`.
+     - **`Auto` / `LLM`** — использует всплески чата и транскрипт Whisper для генерации заголовка, 3-секундного хука и тегов через Cloud LLM API.
+   - Выберите формат **9:16** (`YOLOv8 Smart Crop`, `Cinema Blur` или `Split-Screen`), стиль субтитров `.ass`, пресет микрорекламы и флаг `Уникализация (Anti-CID)`.
+3. **Настройка публикаций (`Настройки` → `Публикация и Автопостинг`):**
+   - **Безопасный режим по умолчанию — «Только локальный экспорт» (`local_only`):** готовые клипы сохраняются только локально в `.mp4` + `.txt`, без автоотправки в соцсети.
+   - Для автоматической отправки выберите **«Автопостинг по расписанию» (`auto_publish`)** и (по необходимости) включите **«Автоматически публиковать лайв-клипы после рендера»**.
+   - Подключите аккаунты через **OAuth2** (заполнив Client ID / Secret и нажав `OAuth`) или добавьте вручную **API Token / Refresh Token / Cookies** (указав паузу `post_gap_minutes`, например `120` мин = 1 ролик раз в 2 часа, и суточный лимит `daily_cap` для защиты от теневого бана).
+   - Для **Instagram Reels** API требует публично доступного `HTTPS`-URL клипа: укажите адрес туннеля (например, `cloudflared tunnel --url http://127.0.0.1:8765`) в поле `Public HTTPS URL`.
+
+### Верификация после интеграции Live Monitor & Auto-Posting (2026-11-20)
+- **Backend (`pytest backend/tests -v`):** **`34 passed in 75.16s`** (`14` M1–M6 + `14` регрессионных `BUG-XX` + `6` новых тестов в `test_live_and_publishing.py`, `0` ошибок, `0` пропусков).
+- **Frontend (`npm.cmd run lint`, `npx.cmd tsc --noEmit`, `npm.cmd run build`):** `eslint .` (`0` errors, `0` warnings), `tsc` (`0` ошибок), `vite build` (`built in 3.72s`).
+- **Tauri / Rust (`cargo check` в `src-tauri/`):** `Finished dev profile` (`0` ошибок).
 
 ---
 

@@ -84,8 +84,9 @@ def build_multimodal_chunks(
     action_bursts: list[dict[str, Any]],
     chunk_minutes: int = 10,
     overlap_sec: float = 60.0,
+    chat_spikes: Optional[list[dict[str, Any]]] = None,
 ) -> list[tuple[float, float, str]]:
-    """Chunk the video timeline into overlapping windows combining speech, audio peaks, and scene cuts."""
+    """Chunk the video timeline into overlapping windows combining speech, audio peaks, chat spikes, and scene cuts."""
     chunk_len = max(120.0, float(chunk_minutes) * 60.0)
     chunks: list[tuple[float, float, str]] = []
     t0 = 0.0
@@ -122,6 +123,19 @@ def build_multimodal_chunks(
                         bs,
                         f"[{bs:.2f}s - {be:.2f}s | {_fmt_ts(bs)}] [ACTION_MONTAGE] "
                         f"частые склейки сцен ({ab.get('cut_count', 4)} склеек/10с — возможен экшен/драка)",
+                    )
+                )
+
+        for cs in chat_spikes or []:
+            cs_start = float(cs.get("start", cs.get("timestamp", 0.0)))
+            cs_end = float(cs.get("end", cs_start + 8.0))
+            if cs_end >= t0 and cs_start <= t1:
+                events.append(
+                    (
+                        cs_start,
+                        f"[{cs_start:.2f}s - {cs_end:.2f}s | {_fmt_ts(cs_start)}] [CHAT_SPIKE] "
+                        f"всплеск чата x{cs.get('ratio', 1.6)} (уник. авторов: {cs.get('unique_authors', 0)}, "
+                        f"хайп-токенов: {cs.get('emote_hits', 0)}, {cs.get('reason', 'реакция зрителей')})",
                     )
                 )
 
@@ -219,6 +233,7 @@ async def analyze_highlights_llm(
     max_duration: float = 60.0,
     focus_prompt: str = "",
     cancel_event: Optional[asyncio.Event] = None,
+    chat_spikes: Optional[list[dict[str, Any]]] = None,
 ) -> list[LLMHighlightItem]:
     """Send multimodal timeline chunks to an OpenAI-compatible Cloud LLM and validate JSON highlights."""
     if not api_key.strip():
@@ -230,6 +245,7 @@ async def analyze_highlights_llm(
         audio_peaks=audio_peaks,
         action_bursts=action_bursts,
         chunk_minutes=chunk_minutes,
+        chat_spikes=chat_spikes,
     )
     sys_msg = SYSTEM_PROMPT.format(min_dur=min_duration, max_dur=max_duration)
     if focus_prompt.strip():
@@ -315,8 +331,9 @@ def analyze_highlights_heuristic(
     min_duration: float = 15.0,
     max_duration: float = 60.0,
     max_highlights: int = 8,
+    chat_spikes: Optional[list[dict[str, Any]]] = None,
 ) -> list[LLMHighlightItem]:
-    """Offline multimodal highlight detector combining audio spikes, scene cut density, and speech."""
+    """Offline multimodal highlight detector combining audio spikes, chat spikes, scene cut density, and speech."""
     if duration <= 2.0:
         return []
 
@@ -336,16 +353,38 @@ def analyze_highlights_heuristic(
 
         peak_hits = [p for p in audio_peaks if float(p["end"]) >= t and float(p["start"]) <= end_t]
         burst_hits = [b for b in action_bursts if float(b["end"]) >= t and float(b["start"]) <= end_t]
+        chat_hits = [
+            cs
+            for cs in (chat_spikes or [])
+            if float(cs.get("end", cs.get("timestamp", 0.0))) >= t
+            and float(cs.get("start", cs.get("timestamp", 0.0))) <= end_t
+        ]
         cut_count = sum(1 for c in scenes if t <= c <= end_t)
         speech_segs = [s for s in transcript if float(s["end"]) >= t and float(s["start"]) <= end_t]
         speech_words = sum(len(str(s.get("text", "")).split()) for s in speech_segs)
 
         audio_score = max((float(p.get("score", 0.0)) for p in peak_hits), default=0.0)
+        chat_score = max((float(cs.get("score", 0.0)) for cs in chat_hits), default=0.0)
         action_score = min(40.0, cut_count * 4.5 + len(burst_hits) * 18.0)
         speech_score = min(35.0, speech_words * 0.65)
-        total_score = round(min(98.0, max(25.0, 20.0 + audio_score * 0.45 + action_score + speech_score)), 1)
+        total_score = round(
+            min(
+                99.0,
+                max(
+                    25.0,
+                    20.0 + audio_score * 0.45 + chat_score * 0.35 + action_score + speech_score,
+                ),
+            ),
+            1,
+        )
 
-        if burst_hits or (cut_count >= 4 and speech_words < 12):
+        if chat_hits and peak_hits:
+            category = "hybrid"
+            reason = f"Всплеск чата + пик громкости ({len(chat_hits)} спайк.)"
+        elif chat_hits:
+            category = "hybrid"
+            reason = f"Всплеск активности чата ({chat_hits[0].get('reason', 'реакция зрителей')})"
+        elif burst_hits or (cut_count >= 4 and speech_words < 12):
             category = "action"
             reason = f"Экшен-пик: {cut_count} склеек сцен и всплеск громкости"
         elif peak_hits and speech_words >= 12:

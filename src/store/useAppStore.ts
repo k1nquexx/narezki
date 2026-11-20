@@ -10,8 +10,13 @@ import type {
   EncoderProbe,
   GPUInfo,
   Job,
+  LiveChannel,
+  LiveChannelRuntime,
+  LiveClipFeedItem,
   LogEntry,
   Project,
+  PublishQueueItem,
+  SocialAccount,
   SubtitlePreset,
   TabId,
 } from "../types/api";
@@ -45,6 +50,11 @@ interface AppState {
   adPresets: AdPreset[];
   backgrounds: BackgroundAsset[];
 
+  liveChannels: LiveChannel[];
+  liveClips: LiveClipFeedItem[];
+  socialAccounts: SocialAccount[];
+  publishQueue: PublishQueueItem[];
+
   logs: LogEntry[];
   logDrawerOpen: boolean;
   toasts: ToastItem[];
@@ -65,6 +75,8 @@ interface AppState {
   refreshClips: (projectId: string) => Promise<void>;
   refreshPresets: () => Promise<void>;
   refreshJobs: () => Promise<void>;
+  refreshLive: () => Promise<void>;
+  refreshPublishing: () => Promise<void>;
   saveSettings: (next: AppSettings) => Promise<AppSettings>;
 }
 
@@ -137,10 +149,15 @@ async function ensureRealtimeSubscriptions(set: StoreSet, get: StoreGet): Promis
             job.job_type === "render_preview" ||
             job.job_type === "export_clip" ||
             job.job_type === "export_batch" ||
-            job.job_type === "basic_cut"
+            job.job_type === "basic_cut" ||
+            job.job_type === "live_process_clip"
           ) {
             const pid = job.project_id || get().selectedProjectId;
             if (pid) void get().refreshClips(pid);
+            if (job.job_type === "live_process_clip") {
+              void get().refreshLive();
+              void get().refreshPublishing();
+            }
           }
         } else if (job.status === "failed" && job.error) {
           get().addToast({
@@ -155,6 +172,40 @@ async function ensureRealtimeSubscriptions(set: StoreSet, get: StoreGet): Promis
         const pid = String(data.project_id || "");
         if (pid && pid === get().selectedProjectId) {
           void get().refreshClips(pid);
+        }
+        if (get().activeTab === "live") {
+          void get().refreshLive();
+        }
+      } else if (evt.type === "live_update") {
+        const channelId = String(data.channel_id || "");
+        const nextStatus = data.status as LiveChannel["status"] | undefined;
+        const nextRuntime = data.runtime as LiveChannelRuntime | undefined;
+        if (channelId) {
+          set((s) => ({
+            liveChannels: s.liveChannels.map((ch) => {
+              if (ch.id !== channelId) return ch;
+              return {
+                ...ch,
+                status: nextStatus ?? ch.status,
+                stream_title:
+                  typeof data.stream_title === "string" ? data.stream_title : ch.stream_title,
+                viewer_count:
+                  typeof data.viewer_count === "number" ? data.viewer_count : ch.viewer_count,
+                runtime: nextRuntime ?? ch.runtime,
+              };
+            }),
+          }));
+        }
+      } else if (evt.type === "publish_update") {
+        const item = data as unknown as PublishQueueItem;
+        if (item?.id) {
+          set((s) => {
+            const exists = s.publishQueue.some((q) => q.id === item.id);
+            const nextQueue = exists
+              ? s.publishQueue.map((q) => (q.id === item.id ? item : q))
+              : [item, ...s.publishQueue];
+            return { publishQueue: nextQueue };
+          });
         }
       }
     });
@@ -206,6 +257,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   subtitlePresets: [],
   adPresets: [],
   backgrounds: [],
+
+  liveChannels: [],
+  liveClips: [],
+  socialAccounts: [],
+  publishQueue: [],
 
   logs: [],
   logDrawerOpen: false,
@@ -312,6 +368,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().refreshProjects(),
       get().refreshPresets(),
       get().refreshJobs(),
+      get().refreshLive(),
+      get().refreshPublishing(),
     ]);
   },
 
@@ -358,6 +416,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   refreshJobs: async () => {
     const jobs = await api.listJobs();
     set({ jobs });
+  },
+
+  refreshLive: async () => {
+    try {
+      const [liveChannels, liveClips] = await Promise.all([
+        api.listLiveChannels(),
+        api.listLiveClips(),
+      ]);
+      set({ liveChannels, liveClips });
+    } catch {
+      // ignore if router unavailable
+    }
+  },
+
+  refreshPublishing: async () => {
+    try {
+      const [socialAccounts, publishQueue] = await Promise.all([
+        api.listSocialAccounts(),
+        api.listPublishQueue(),
+      ]);
+      set({ socialAccounts, publishQueue });
+    } catch {
+      // ignore if router unavailable
+    }
   },
 
   saveSettings: async (next) => {

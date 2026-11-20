@@ -200,3 +200,104 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class LiveChannel(Base):
+    __tablename__ = "live_channels"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    platform: Mapped[str] = mapped_column(String(24), nullable=False)  # twitch | kick | youtube
+    channel_url: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    status: Mapped[str] = mapped_column(String(32), default="offline")  # offline | online | recording | error
+    stream_title: Mapped[str] = mapped_column(Text, default="")
+    viewer_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    check_interval_sec: Mapped[int] = mapped_column(Integer, default=60)
+    buffer_minutes: Mapped[int] = mapped_column(Integer, default=20)
+    ai_mode: Mapped[str] = mapped_column(String(24), default="zero_ai")  # zero_ai | llm | auto
+    chat_sensitivity: Mapped[float] = mapped_column(Float, default=1.6)
+    audio_sensitivity: Mapped[float] = mapped_column(Float, default=1.6)
+    clip_pre_sec: Mapped[float] = mapped_column(Float, default=25.0)
+    clip_post_sec: Mapped[float] = mapped_column(Float, default=15.0)
+    min_clip_gap_sec: Mapped[int] = mapped_column(Integer, default=90)
+
+    crop_mode: Mapped[str] = mapped_column(String(32), default="auto_track")
+    subtitle_preset_id: Mapped[Optional[str]] = mapped_column(
+        String(32), ForeignKey("subtitle_presets.id", ondelete="SET NULL"), nullable=True
+    )
+    ad_preset_id: Mapped[Optional[str]] = mapped_column(
+        String(32), ForeignKey("ad_presets.id", ondelete="SET NULL"), nullable=True
+    )
+    background_asset_id: Mapped[Optional[str]] = mapped_column(
+        String(32), ForeignKey("background_assets.id", ondelete="SET NULL"), nullable=True
+    )
+    anti_cid_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_publish: Mapped[bool] = mapped_column(Boolean, default=False)
+    publish_account_ids_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    active_project_id: Mapped[Optional[str]] = mapped_column(
+        String(32), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class SocialAccount(Base):
+    __tablename__ = "social_accounts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    platform: Mapped[str] = mapped_column(String(24), nullable=False)  # youtube | tiktok | instagram
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    auth_type: Mapped[str] = mapped_column(String(24), default="token")  # oauth | token | cookies
+    credentials_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    default_privacy: Mapped[str] = mapped_column(String(24), default="public")  # public | unlisted | private
+    post_gap_minutes: Mapped[int] = mapped_column(Integer, default=120)
+    daily_cap: Mapped[int] = mapped_column(Integer, default=6)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class PublishQueueItem(Base):
+    __tablename__ = "publish_queue"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    clip_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("clips.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id: Mapped[Optional[str]] = mapped_column(
+        String(32), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
+    )
+    account_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("social_accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    platform: Mapped[str] = mapped_column(String(24), nullable=False)
+    account_name: Mapped[str] = mapped_column(String(120), default="")
+    title: Mapped[str] = mapped_column(String(255), default="")
+    caption: Mapped[str] = mapped_column(Text, default="")
+    tags_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    privacy: Mapped[str] = mapped_column(String(24), default="public")
+    video_path: Mapped[str] = mapped_column(Text, default="")
+
+    status: Mapped[str] = mapped_column(String(24), default="scheduled", index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    posted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    tries: Mapped[int] = mapped_column(Integer, default=0)
+    remote_id: Mapped[str] = mapped_column(String(128), default="")
+    remote_url: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

@@ -41,6 +41,11 @@ async def run_analysis_pipeline(ctx: JobContext) -> dict[str, Any]:
         analysis_video = Path(proj.proxy_path) if proj.proxy_path and Path(proj.proxy_path).exists() else source_path
         duration = float(proj.duration or 0.0)
         has_audio = bool(proj.has_audio)
+        existing_chat_spikes = (
+            list(proj.analysis_json.get("chat_spikes") or [])
+            if isinstance(proj.analysis_json, dict)
+            else []
+        )
 
         default_sub = (
             await session.execute(select(SubtitlePreset).where(SubtitlePreset.is_default.is_(True)))
@@ -135,6 +140,7 @@ async def run_analysis_pipeline(ctx: JobContext) -> dict[str, Any]:
                     max_duration=max_duration,
                     focus_prompt=focus_prompt,
                     cancel_event=ctx.cancel_event,
+                    chat_spikes=existing_chat_spikes or None,
                 )
             except Exception as llm_exc:
                 if mode == "llm":
@@ -153,6 +159,7 @@ async def run_analysis_pipeline(ctx: JobContext) -> dict[str, Any]:
                     min_duration=min_duration,
                     max_duration=max_duration,
                     max_highlights=max_highlights,
+                    chat_spikes=existing_chat_spikes or None,
                 )
         else:
             await ctx.update_progress(
@@ -167,6 +174,7 @@ async def run_analysis_pipeline(ctx: JobContext) -> dict[str, Any]:
                 min_duration=min_duration,
                 max_duration=max_duration,
                 max_highlights=max_highlights,
+                chat_spikes=existing_chat_spikes or None,
             )
 
         await ctx.update_progress(92.0, "saving", "Привязка границ клипов и сохранение в БД...")
@@ -183,6 +191,7 @@ async def run_analysis_pipeline(ctx: JobContext) -> dict[str, Any]:
             "scenes": scene_data["scenes"],
             "action_bursts": scene_data["action_bursts"],
             "audio_peaks": audio_data,
+            "chat_spikes": existing_chat_spikes,
             "transcript": whisper_data["segments"],
             "words": whisper_data["words"],
             "language": whisper_data["language"],

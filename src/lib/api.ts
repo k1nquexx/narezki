@@ -7,7 +7,13 @@ import type {
   GPUInfo,
   Job,
   LLMTestResult,
+  LiveChannel,
+  LiveClipFeedItem,
   Project,
+  PublishQueueItem,
+  SocialAccount,
+  SocialAuthType,
+  SocialPlatform,
   SubtitleCue,
   SubtitlePreset,
   SystemHealth,
@@ -200,6 +206,76 @@ class ApiClient {
     });
   deleteBackground = (id: string): Promise<{ ok: boolean }> =>
     this.request(`/api/presets/backgrounds/${id}`, { method: "DELETE" });
+
+  // Live Monitor
+  listLiveChannels = (): Promise<LiveChannel[]> => this.request("/api/live/channels");
+  createLiveChannel = (
+    body: Partial<LiveChannel> & { channel_url: string }
+  ): Promise<LiveChannel> =>
+    this.request("/api/live/channels", { method: "POST", body: JSON.stringify(body) });
+  updateLiveChannel = (id: string, body: Partial<LiveChannel>): Promise<LiveChannel> =>
+    this.request(`/api/live/channels/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+  deleteLiveChannel = (id: string): Promise<{ ok: boolean }> =>
+    this.request(`/api/live/channels/${id}`, { method: "DELETE" });
+  startLiveChannel = (id: string): Promise<LiveChannel> =>
+    this.request(`/api/live/channels/${id}/start`, { method: "POST" });
+  stopLiveChannel = (id: string): Promise<LiveChannel> =>
+    this.request(`/api/live/channels/${id}/stop`, { method: "POST" });
+  checkLiveChannel = (
+    id: string
+  ): Promise<{ probe: Record<string, unknown>; channel: LiveChannel }> =>
+    this.request(`/api/live/channels/${id}/check`, { method: "POST" });
+  clipLiveNow = (
+    id: string,
+    seconds = 45
+  ): Promise<{ clip_id: string; project_id: string; job_id: string }> =>
+    this.request(`/api/live/channels/${id}/clip-now`, {
+      method: "POST",
+      body: JSON.stringify({ seconds }),
+    });
+  listLiveClips = (limit = 50): Promise<LiveClipFeedItem[]> =>
+    this.request(`/api/live/clips?limit=${limit}`);
+
+  // Publishing & Accounts
+  listSocialAccounts = (): Promise<SocialAccount[]> =>
+    this.request("/api/publishing/accounts");
+  createSocialAccount = (body: {
+    platform: SocialPlatform;
+    name: string;
+    auth_type: SocialAuthType;
+    credentials_json: Record<string, unknown>;
+    default_privacy?: "public" | "unlisted" | "private";
+    post_gap_minutes?: number;
+    daily_cap?: number;
+    enabled?: boolean;
+  }): Promise<SocialAccount> =>
+    this.request("/api/publishing/accounts", { method: "POST", body: JSON.stringify(body) });
+  updateSocialAccount = (
+    id: string,
+    body: Partial<SocialAccount> & { credentials_json?: Record<string, unknown> }
+  ): Promise<SocialAccount> =>
+    this.request(`/api/publishing/accounts/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+  deleteSocialAccount = (id: string): Promise<{ ok: boolean }> =>
+    this.request(`/api/publishing/accounts/${id}`, { method: "DELETE" });
+  getOAuthUrl = (platform: SocialPlatform): Promise<{ url: string; redirect_uri: string }> =>
+    this.request(`/api/publishing/oauth/${platform}/url`);
+  listPublishQueue = (status?: string): Promise<PublishQueueItem[]> =>
+    this.request(`/api/publishing/queue${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+  enqueuePublish = (body: {
+    clip_id: string;
+    account_ids: string[];
+    publish_now?: boolean;
+    title?: string;
+    caption?: string;
+    privacy?: "public" | "unlisted" | "private";
+  }): Promise<PublishQueueItem[]> =>
+    this.request("/api/publishing/enqueue", { method: "POST", body: JSON.stringify(body) });
+  cancelPublishItem = (id: string): Promise<PublishQueueItem> =>
+    this.request(`/api/publishing/queue/${id}/cancel`, { method: "POST" });
+  retryPublishItem = (id: string): Promise<PublishQueueItem> =>
+    this.request(`/api/publishing/queue/${id}/retry`, { method: "POST" });
+  deletePublishItem = (id: string): Promise<{ ok: boolean }> =>
+    this.request(`/api/publishing/queue/${id}`, { method: "DELETE" });
 }
 
 export const api = new ApiClient();

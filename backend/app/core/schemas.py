@@ -117,7 +117,7 @@ class ClipCreate(BaseModel):
     hook_enabled: bool = True
     description: str = ""
     tags_json: list[str] = Field(default_factory=list)
-    category: Literal["dialogue", "action", "hybrid", "manual"] = "manual"
+    category: Literal["dialogue", "action", "hybrid", "manual", "live_spike"] = "manual"
     start_time: float = Field(ge=0.0)
     end_time: float = Field(gt=0.0)
     crop_mode: Literal["auto_track", "cinema_blur", "split_screen"] = "auto_track"
@@ -135,7 +135,7 @@ class ClipUpdate(BaseModel):
     description: Optional[str] = None
     tags_json: Optional[list[str]] = None
     virality_score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
-    category: Optional[Literal["dialogue", "action", "hybrid", "manual"]] = None
+    category: Optional[Literal["dialogue", "action", "hybrid", "manual", "live_spike"]] = None
     reason: Optional[str] = None
     start_time: Optional[float] = Field(default=None, ge=0.0)
     end_time: Optional[float] = Field(default=None, gt=0.0)
@@ -394,3 +394,165 @@ class LLMHighlightItem(BaseModel):
 
 class LLMHighlightsResponse(BaseModel):
     highlights: list[LLMHighlightItem] = Field(default_factory=list)
+
+
+# --- Live Monitor & Auto-Posting ---
+
+
+class LiveChannelCreate(BaseModel):
+    channel_url: str
+    name: Optional[str] = None
+    platform: Optional[Literal["twitch", "kick", "youtube"]] = None
+    enabled: bool = True
+    check_interval_sec: int = Field(default=60, ge=15, le=600)
+    buffer_minutes: int = Field(default=20, ge=5, le=60)
+    ai_mode: Literal["zero_ai", "llm", "auto"] = "zero_ai"
+    chat_sensitivity: float = Field(default=1.6, ge=1.1, le=5.0)
+    audio_sensitivity: float = Field(default=1.6, ge=1.1, le=5.0)
+    clip_pre_sec: float = Field(default=25.0, ge=5.0, le=90.0)
+    clip_post_sec: float = Field(default=15.0, ge=2.0, le=60.0)
+    min_clip_gap_sec: int = Field(default=90, ge=15, le=600)
+    crop_mode: Literal["auto_track", "cinema_blur", "split_screen"] = "auto_track"
+    subtitle_preset_id: Optional[str] = None
+    ad_preset_id: Optional[str] = None
+    background_asset_id: Optional[str] = None
+    anti_cid_enabled: bool = True
+    auto_publish: bool = False
+    publish_account_ids_json: list[str] = Field(default_factory=list)
+
+
+class LiveChannelUpdate(BaseModel):
+    name: Optional[str] = None
+    channel_url: Optional[str] = None
+    enabled: Optional[bool] = None
+    check_interval_sec: Optional[int] = Field(default=None, ge=15, le=600)
+    buffer_minutes: Optional[int] = Field(default=None, ge=5, le=60)
+    ai_mode: Optional[Literal["zero_ai", "llm", "auto"]] = None
+    chat_sensitivity: Optional[float] = Field(default=None, ge=1.1, le=5.0)
+    audio_sensitivity: Optional[float] = Field(default=None, ge=1.1, le=5.0)
+    clip_pre_sec: Optional[float] = Field(default=None, ge=5.0, le=90.0)
+    clip_post_sec: Optional[float] = Field(default=None, ge=2.0, le=60.0)
+    min_clip_gap_sec: Optional[int] = Field(default=None, ge=15, le=600)
+    crop_mode: Optional[Literal["auto_track", "cinema_blur", "split_screen"]] = None
+    subtitle_preset_id: Optional[str] = None
+    ad_preset_id: Optional[str] = None
+    background_asset_id: Optional[str] = None
+    anti_cid_enabled: Optional[bool] = None
+    auto_publish: Optional[bool] = None
+    publish_account_ids_json: Optional[list[str]] = None
+
+
+class LiveChannelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    platform: str
+    channel_url: str
+    enabled: bool
+    status: str
+    stream_title: str
+    viewer_count: Optional[int] = None
+    check_interval_sec: int
+    buffer_minutes: int
+    ai_mode: str
+    chat_sensitivity: float
+    audio_sensitivity: float
+    clip_pre_sec: float
+    clip_post_sec: float
+    min_clip_gap_sec: int
+    crop_mode: str
+    subtitle_preset_id: Optional[str] = None
+    ad_preset_id: Optional[str] = None
+    background_asset_id: Optional[str] = None
+    anti_cid_enabled: bool
+    auto_publish: bool
+    publish_account_ids_json: list[str]
+    active_project_id: Optional[str] = None
+    last_error: Optional[str] = None
+    last_checked_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    runtime: dict[str, Any] = Field(default_factory=dict)
+
+
+class LiveClipNowRequest(BaseModel):
+    seconds: float = Field(default=45.0, ge=5.0, le=180.0)
+
+
+class LiveClipFeedOut(BaseModel):
+    clip: ClipOut
+    channel_id: Optional[str] = None
+    channel_name: str = ""
+    platform: str = ""
+
+
+class SocialAccountCreate(BaseModel):
+    platform: Literal["youtube", "tiktok", "instagram"]
+    name: str
+    auth_type: Literal["oauth", "token", "cookies"] = "token"
+    credentials_json: dict[str, Any] = Field(default_factory=dict)
+    default_privacy: Literal["public", "unlisted", "private"] = "public"
+    post_gap_minutes: int = Field(default=120, ge=5, le=1440)
+    daily_cap: int = Field(default=6, ge=1, le=50)
+    enabled: bool = True
+
+
+class SocialAccountUpdate(BaseModel):
+    name: Optional[str] = None
+    credentials_json: Optional[dict[str, Any]] = None
+    default_privacy: Optional[Literal["public", "unlisted", "private"]] = None
+    post_gap_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
+    daily_cap: Optional[int] = Field(default=None, ge=1, le=50)
+    enabled: Optional[bool] = None
+
+
+class SocialAccountOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    platform: str
+    name: str
+    auth_type: str
+    has_credentials: bool = False
+    default_privacy: str
+    post_gap_minutes: int
+    daily_cap: int
+    enabled: bool
+    detail: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class PublishEnqueueRequest(BaseModel):
+    clip_id: str
+    account_ids: list[str]
+    publish_now: bool = False
+    title: Optional[str] = None
+    caption: Optional[str] = None
+    privacy: Optional[Literal["public", "unlisted", "private"]] = None
+
+
+class PublishQueueItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    clip_id: str
+    project_id: Optional[str] = None
+    account_id: str
+    platform: str
+    account_name: str
+    title: str
+    caption: str
+    tags_json: list[str]
+    privacy: str
+    video_path: str
+    status: str
+    scheduled_for: datetime
+    posted_at: Optional[datetime] = None
+    tries: int
+    remote_id: str
+    remote_url: str
+    error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime

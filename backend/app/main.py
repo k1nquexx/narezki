@@ -60,6 +60,12 @@ def _register_job_handlers() -> None:
         register_render_handlers(queue_manager)
     except ImportError:
         pass
+    try:
+        from app.services.live.handlers import register_live_handlers
+
+        register_live_handlers(queue_manager)
+    except ImportError:
+        pass
 
 
 @asynccontextmanager
@@ -70,6 +76,16 @@ async def lifespan(_app: FastAPI):
     _register_job_handlers()
     await probe_encoders()
     await queue_manager.start()
+
+    try:
+        from app.services.live.live_watcher import live_watcher
+        from app.services.live.publisher import publisher_service
+
+        await live_watcher.start()
+        await publisher_service.start()
+    except ImportError:
+        live_watcher = None  # type: ignore[assignment]
+        publisher_service = None  # type: ignore[assignment]
 
     gpu = await get_gpu_info_async()
     await ws_manager.log(
@@ -83,6 +99,14 @@ async def lifespan(_app: FastAPI):
         telemetry_task.cancel()
         with suppress(asyncio.CancelledError):
             await telemetry_task
+        try:
+            from app.services.live.live_watcher import live_watcher
+            from app.services.live.publisher import publisher_service
+
+            await live_watcher.stop()
+            await publisher_service.stop()
+        except ImportError:
+            pass
         await queue_manager.stop()
         await release_vram_async("shutdown")
 
@@ -152,6 +176,20 @@ try:
     from app.api import clips as clips_router
 
     app.include_router(clips_router.router)
+except ImportError:
+    pass
+
+try:
+    from app.api import live as live_router
+
+    app.include_router(live_router.router)
+except ImportError:
+    pass
+
+try:
+    from app.api import publishing as publishing_router
+
+    app.include_router(publishing_router.router)
 except ImportError:
     pass
 

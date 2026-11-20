@@ -97,5 +97,14 @@ class ConnectionManager:
             {"clip_id": clip_id, "project_id": project_id, "status": status, **extra},
         )
 
+    async def emit_live_update(self, channel_id: str, status: str, **extra: Any) -> None:
+        await self.broadcast(
+            "live_update",
+            {"channel_id": channel_id, "status": status, **extra},
+        )
+
+    async def emit_publish_update(self, item_dict: dict[str, Any]) -> None:
+        await self.broadcast("publish_update", item_dict)
+
 
 ws_manager = ConnectionManager()

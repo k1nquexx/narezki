@@ -1,5 +1,13 @@
 export interface WSEvent {
-  type: "job_update" | "log" | "gpu_status" | "project_update" | "clip_update" | "pong";
+  type:
+    | "job_update"
+    | "log"
+    | "gpu_status"
+    | "project_update"
+    | "clip_update"
+    | "live_update"
+    | "publish_update"
+    | "pong";
   timestamp?: string;
   data?: Record<string, unknown>;
 }

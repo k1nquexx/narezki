@@ -16,12 +16,13 @@ PROJECTS_DIR = DATA_DIR / "projects"
 ADS_DIR = DATA_DIR / "ads"
 BACKGROUNDS_DIR = DATA_DIR / "backgrounds"
 EXPORTS_DIR = DATA_DIR / "exports"
+LIVE_BUFFER_DIR = DATA_DIR / "live_buffers"
 MODELS_DIR = Path(os.environ.get("NAREZKI_MODELS_DIR") or (BACKEND_DIR / "data" / "models"))
 LOGS_DIR = DATA_DIR / "logs"
 TEMP_DIR = DATA_DIR / "temp"
 DB_PATH = DATA_DIR / "narezki.db"
 
-ALLOWED_MEDIA_DIRS = (PROJECTS_DIR, ADS_DIR, BACKGROUNDS_DIR, EXPORTS_DIR)
+ALLOWED_MEDIA_DIRS = (PROJECTS_DIR, ADS_DIR, BACKGROUNDS_DIR, EXPORTS_DIR, LIVE_BUFFER_DIR)
 BLOCKED_MEDIA_SUFFIXES = {
     ".db",
     ".db-wal",
@@ -43,6 +44,7 @@ def ensure_data_dirs() -> None:
         ADS_DIR,
         BACKGROUNDS_DIR,
         EXPORTS_DIR,
+        LIVE_BUFFER_DIR,
         MODELS_DIR,
         LOGS_DIR,
         TEMP_DIR,
@@ -120,6 +122,24 @@ class AppSettingsModel(BaseModel):
     default_anti_cid_contrast: float = Field(default=1.02, ge=0.9, le=1.2)
     default_anti_cid_saturation: float = Field(default=1.03, ge=0.85, le=1.25)
     default_anti_cid_strip_metadata: bool = Field(default=True)
+
+    # Live Monitor & Auto-Posting
+    live_check_interval_sec: int = Field(default=60, ge=15, le=600)
+    live_default_buffer_minutes: int = Field(default=20, ge=5, le=60)
+    live_default_ai_mode: Literal["zero_ai", "llm", "auto"] = Field(default="zero_ai")
+    live_auto_publish: bool = Field(default=False)
+
+    publish_mode: Literal["local_only", "auto_publish"] = Field(default="local_only")
+    publish_paused: bool = Field(default=False)
+    publish_default_gap_minutes: int = Field(default=120, ge=5, le=1440)
+    publish_default_daily_cap: int = Field(default=6, ge=1, le=50)
+    publish_public_base_url: str = Field(default="http://127.0.0.1:8765")
+    youtube_client_id: str = Field(default="")
+    youtube_client_secret: str = Field(default="")
+    tiktok_client_key: str = Field(default="")
+    tiktok_client_secret: str = Field(default="")
+    instagram_app_id: str = Field(default="")
+    instagram_app_secret: str = Field(default="")
 
 
 def get_project_dir(project_id: str) -> Path:

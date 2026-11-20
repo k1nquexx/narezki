@@ -1,7 +1,12 @@
-export type TabId = "projects" | "studio" | "presets" | "settings";
+export type TabId = "projects" | "live" | "studio" | "presets" | "settings";
 
 export type CropMode = "auto_track" | "cinema_blur" | "split_screen";
-export type ClipCategory = "dialogue" | "action" | "hybrid" | "manual";
+export type ClipCategory = "dialogue" | "action" | "hybrid" | "manual" | "live_spike";
+export type LivePlatform = "twitch" | "kick" | "youtube";
+export type LiveAiMode = "zero_ai" | "llm" | "auto";
+export type SocialPlatform = "youtube" | "tiktok" | "instagram";
+export type PublishMode = "local_only" | "auto_publish";
+export type SocialAuthType = "oauth" | "token" | "cookies";
 export type KaraokeMode = "karaoke_fill" | "word_highlight" | "phrase";
 export type AdType = "video_insert" | "overlay";
 export type AdInsertPosition = "mid_roll" | "outro";
@@ -259,6 +264,112 @@ export interface AppSettings {
   default_anti_cid_contrast: number;
   default_anti_cid_saturation: number;
   default_anti_cid_strip_metadata: boolean;
+
+  live_check_interval_sec: number;
+  live_default_buffer_minutes: number;
+  live_default_ai_mode: LiveAiMode;
+  live_auto_publish: boolean;
+
+  publish_mode: PublishMode;
+  publish_paused: boolean;
+  publish_default_gap_minutes: number;
+  publish_default_daily_cap: number;
+  publish_public_base_url: string;
+  youtube_client_id: string;
+  youtube_client_secret: string;
+  tiktok_client_key: string;
+  tiktok_client_secret: string;
+  instagram_app_id: string;
+  instagram_app_secret: string;
+}
+
+export interface LiveChannelRuntime {
+  channel_id: string;
+  status: string;
+  stream_seconds: number;
+  buffer_span_sec: number;
+  buffer_disk_mb: number;
+  clips_created: number;
+  audio_db_recent: number[];
+  chat_rate_recent: number[];
+  last_error: string | null;
+}
+
+export interface LiveChannel {
+  id: string;
+  name: string;
+  platform: LivePlatform;
+  channel_url: string;
+  enabled: boolean;
+  status: "offline" | "online" | "recording" | "error";
+  stream_title: string;
+  viewer_count: number | null;
+  check_interval_sec: number;
+  buffer_minutes: number;
+  ai_mode: LiveAiMode;
+  chat_sensitivity: number;
+  audio_sensitivity: number;
+  clip_pre_sec: number;
+  clip_post_sec: number;
+  min_clip_gap_sec: number;
+  crop_mode: CropMode;
+  subtitle_preset_id: string | null;
+  ad_preset_id: string | null;
+  background_asset_id: string | null;
+  anti_cid_enabled: boolean;
+  auto_publish: boolean;
+  publish_account_ids_json: string[];
+  active_project_id: string | null;
+  last_error: string | null;
+  last_checked_at: string | null;
+  created_at: string;
+  updated_at: string;
+  runtime: LiveChannelRuntime;
+}
+
+export interface LiveClipFeedItem {
+  clip: Clip;
+  channel_id: string | null;
+  channel_name: string;
+  platform: string;
+}
+
+export interface SocialAccount {
+  id: string;
+  platform: SocialPlatform;
+  name: string;
+  auth_type: SocialAuthType;
+  has_credentials: boolean;
+  default_privacy: "public" | "unlisted" | "private";
+  post_gap_minutes: number;
+  daily_cap: number;
+  enabled: boolean;
+  detail: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PublishQueueItem {
+  id: string;
+  clip_id: string;
+  project_id: string | null;
+  account_id: string;
+  platform: SocialPlatform;
+  account_name: string;
+  title: string;
+  caption: string;
+  tags_json: string[];
+  privacy: string;
+  video_path: string;
+  status: "scheduled" | "posting" | "posted" | "failed" | "cancelled";
+  scheduled_for: string;
+  posted_at: string | null;
+  tries: number;
+  remote_id: string;
+  remote_url: string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface LLMTestResult {

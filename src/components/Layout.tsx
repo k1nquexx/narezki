@@ -4,6 +4,7 @@ import {
   Film,
   FolderKanban,
   Megaphone,
+  Radio,
   RefreshCw,
   Scissors,
   Settings,
@@ -17,6 +18,7 @@ import { LogDrawer } from "./LogDrawer";
 
 const NAV_ITEMS: Array<{ id: TabId; label: string; icon: typeof FolderKanban }> = [
   { id: "projects", label: "Проекты и очередь", icon: FolderKanban },
+  { id: "live", label: "Live Monitor", icon: Radio },
   { id: "studio", label: "Студия клипов", icon: Scissors },
   { id: "presets", label: "Реклама и стили", icon: Megaphone },
   { id: "settings", label: "Настройки", icon: Settings },
@@ -30,6 +32,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const wsConnected = useAppStore((s) => s.wsConnected);
   const backendConnected = useAppStore((s) => s.backendConnected);
   const jobs = useAppStore((s) => s.jobs);
+  const liveChannels = useAppStore((s) => s.liveChannels);
   const logDrawerOpen = useAppStore((s) => s.logDrawerOpen);
   const setLogDrawerOpen = useAppStore((s) => s.setLogDrawerOpen);
   const reconnectBackend = useAppStore((s) => s.reconnectBackend);
@@ -38,6 +41,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const activeJobsCount = jobs.filter(
     (j) => j.status === "running" || j.status === "queued"
   ).length;
+  const liveRecordingCount = liveChannels.filter((c) => c.status === "recording").length;
 
   const vramPct =
     gpuInfo && gpuInfo.vram_total_mb > 0
@@ -97,6 +101,12 @@ export function Layout({ children }: { children: ReactNode }) {
                   {item.id === "projects" && activeJobsCount > 0 && (
                     <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30">
                       {activeJobsCount}
+                    </span>
+                  )}
+                  {item.id === "live" && liveRecordingCount > 0 && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                      {liveRecordingCount}
                     </span>
                   )}
                 </button>

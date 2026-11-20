@@ -71,9 +71,16 @@ fn resolve_backend_dir() -> Option<PathBuf> {
         }
     }
 
-    candidates
+    let valid: Vec<PathBuf> = candidates
         .into_iter()
-        .find(|p| p.join("app").join("main.py").exists())
+        .filter(|p| p.join("app").join("main.py").exists())
+        .collect();
+
+    valid
+        .iter()
+        .find(|p| p.join(".venv").exists())
+        .cloned()
+        .or_else(|| valid.into_iter().next())
 }
 
 fn resolve_python_executable(backend_dir: &PathBuf) -> PathBuf {

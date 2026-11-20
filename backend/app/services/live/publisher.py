@@ -281,6 +281,16 @@ def _check_http(r: httpx.Response, label: str) -> httpx.Response:
     return r
 
 
+def _safe_expires_at(creds: dict[str, Any]) -> float:
+    raw = creds.get("expires_at")
+    if raw is None or raw == "":
+        return 0.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 async def upload_youtube_short(
     creds: dict[str, Any],
     video_path: Path,
@@ -294,7 +304,7 @@ async def upload_youtube_short(
     """Upload MP4 to YouTube Shorts via resumable Data API v3."""
     async with httpx.AsyncClient(timeout=900.0) as client:
         token = str(creds.get("access_token") or "")
-        if not token or float(creds.get("expires_at", 0)) <= time.time():
+        if not token or _safe_expires_at(creds) <= time.time():
             cid, secret = _app_keys_for("youtube", settings)
             refresh = str(creds.get("refresh_token") or "")
             if not (cid and secret and refresh):
@@ -392,7 +402,7 @@ async def upload_tiktok_video(
     """Upload MP4 to TikTok Content Posting API v2 with chunked upload and SELF_ONLY fallback."""
     async with httpx.AsyncClient(timeout=900.0) as client:
         token = str(creds.get("access_token") or "")
-        if not token or (creds.get("refresh_token") and float(creds.get("expires_at", 0)) <= time.time()):
+        if not token or (creds.get("refresh_token") and _safe_expires_at(creds) <= time.time()):
             cid, secret = _app_keys_for("tiktok", settings)
             refresh = str(creds.get("refresh_token") or "")
             if cid and secret and refresh:
@@ -436,6 +446,8 @@ async def upload_tiktok_video(
         level = next((p for p in desired if p in options), "SELF_ONLY" if "SELF_ONLY" in options else options[0])
 
         size = video_path.stat().st_size
+        if size <= 0:
+            raise RuntimeError("Видеофайл пуст (0 байт), загрузка в TikTok невозможна")
         chunk_size = size if size <= 64_000_000 else 10_000_000
         chunk_count = 1 if size <= 64_000_000 else max(1, size // 10_000_000)
 
@@ -487,6 +499,7 @@ async def upload_tiktok_video(
 
         publish_id = str(box["publish_id"])
         status_data: dict[str, Any] = {}
+        completed = False
         for _ in range(60):
             status_data = await _tt_post(
                 "/post/publish/status/fetch/",
@@ -495,10 +508,16 @@ async def upload_tiktok_video(
             )
             st = status_data.get("status")
             if st == "PUBLISH_COMPLETE":
+                completed = True
                 break
             if st == "FAILED":
                 raise RuntimeError(f"TikTok отклонил публикацию: {status_data.get('fail_reason') or 'unknown'}")
             await asyncio.sleep(2.0)
+
+        if not completed:
+            raise RuntimeError(
+                f"Таймаут обработки видео на стороне TikTok (последний статус: {status_data.get('status') or 'unknown'})"
+            )
 
         ids = status_data.get("publicaly_available_post_id") or status_data.get("publicly_available_post_id") or []
         username = creator_info.get("creator_username") or ""
@@ -586,6 +605,8 @@ async def upload_instagram_reel(
             )
 
         creation_id = str(box["id"])
+        ig_ready = False
+        last_ig_code: Any = None
         for _ in range(60):
             st = _check_http(
                 await client.get(
@@ -597,11 +618,18 @@ async def upload_instagram_reel(
                 "Instagram processing status",
             ).json()
             code = st.get("status_code")
+            last_ig_code = code
             if code in ("FINISHED", "PUBLISHED"):
+                ig_ready = True
                 break
             if code in ("ERROR", "EXPIRED"):
                 raise RuntimeError(f"Instagram отклонил видео: {st.get('status', code)}")
             await asyncio.sleep(2.0)
+
+        if not ig_ready:
+            raise RuntimeError(
+                f"Таймаут обработки видео на стороне Instagram (последний статус: {last_ig_code or 'unknown'})"
+            )
 
         pub = _check_http(
             await client.post(
@@ -844,7 +872,7 @@ class PublisherService:
 
             async with AsyncSessionLocal() as session:
                 row = await session.get(PublishQueueItem, item_id)
-                if row is not None:
+                if row is not None and row.status != "cancelled":
                     row.status = "posted"
                     row.posted_at = _utcnow()
                     row.remote_id = remote_id
@@ -863,7 +891,7 @@ class PublisherService:
             err_msg = str(exc) or exc.__class__.__name__
             async with AsyncSessionLocal() as session:
                 row = await session.get(PublishQueueItem, item_id)
-                if row is not None:
+                if row is not None and row.status != "cancelled":
                     row.tries += 1
                     row.error = err_msg[:300]
                     if row.tries < 3:

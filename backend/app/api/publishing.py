@@ -269,6 +269,8 @@ async def cancel_publish_item(item_id: str, db: AsyncSession = Depends(get_db)) 
     item = await db.get(PublishQueueItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Элемент очереди не найден")
+    if item.status == "posting":
+        raise HTTPException(status_code=409, detail="Нельзя отменить публикацию во время активной загрузки")
     item.status = "cancelled"
     item.updated_at = datetime.now(timezone.utc)
     await db.commit()

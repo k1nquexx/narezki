@@ -135,7 +135,7 @@
 
 ---
 
-### [BUG-29] `MAJOR` — Ложный статус `posted` при таймауте TikTok/Instagram, перезапись отмены (`cancelled`) и `TypeError` на `expires_at=None`
+### [BUG-29] `MAJOR` `[FIXED]` — Ложный статус `posted` при таймауте TikTok/Instagram, перезапись отмены (`cancelled`) и `TypeError` на `expires_at=None`
 - **Файл и строка:** `backend/app/services/live/publisher.py:297, 438-440, 490-507, 589-605, 845-884`, `backend/app/api/publishing.py:259-270`
 - **Суть проблемы:**
   1. В `upload_tiktok_video()` (строки 490–502) цикл опроса статуса делает 60 итераций по 2 секунды; если за 120 секунд статус так и не стал `PUBLISH_COMPLETE`, цикл завершается **без исключения**, и элемент очереди ошибочно помечается как `"posted"`. Аналогично в `upload_instagram_reel()` (строки 589–605): при истечении 120 секунд ожидания обработки код без проверки пытается вызвать `media_publish`, падая с неинформативной ошибкой API.

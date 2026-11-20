@@ -68,7 +68,7 @@ def build_overlay_filtergraph(
     dur = end_t - start_t
     fade_d = max(0.0, min(float(fade_duration), dur * 0.45))
 
-    ov_chain = [f"[{ov_in}]format=rgba", f"scale={target_w}:-2:flags=lanczos"]
+    ov_chain = [f"[{ov_in}]setpts=PTS-STARTPTS", "format=rgba", f"scale={target_w}:-2:flags=lanczos"]
     if fade_d >= 0.05:
         ov_chain.append(f"fade=t=in:st={start_t:.3f}:d={fade_d:.3f}:alpha=1")
         ov_chain.append(f"fade=t=out:st={max(start_t, end_t - fade_d):.3f}:d={fade_d:.3f}:alpha=1")

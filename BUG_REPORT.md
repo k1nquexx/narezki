@@ -166,7 +166,7 @@
 
 ---
 
-### [BUG-32] `MAJOR` — Несброшенный PTS до `trim`/`overlay` и отсутствие проверки видеопотока у `video_insert` в `ffmpeg_runner.py`
+### [BUG-32] `MAJOR` `[FIXED]` — Несброшенный PTS до `trim`/`overlay` и отсутствие проверки видеопотока у `video_insert` в `ffmpeg_runner.py`
 - **Файл и строка:** `backend/app/services/renderer/ffmpeg_runner.py:369-384`, `backend/app/services/renderer/ad_injector.py:71-75`
 - **Суть проблемы:**
   1. В `ffmpeg_runner.py:376-380` фильтры `trim=duration={clip_dur:.3f}` и `atrim=duration={clip_dur:.3f}` стоят **до** `setpts=PTS-STARTPTS` / `asetpts=PTS-STARTPTS`. Если входной файл после `-ss` имеет ненулевой начальный PTS (типично для MPEG-TS / live-записей), `trim=duration=...` обрежет клип раньше времени.

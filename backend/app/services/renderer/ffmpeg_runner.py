@@ -395,16 +395,18 @@ async def render_clip(
                 ov_idx = next_idx
                 next_idx += 1
             elif ad_type == "video_insert":
-                ad_meta = await probe_media(ad_file)
+                ad_meta = await probe_media(ad_file, require_video=True)
                 input_args.extend(["-i", str(ad_file)])
                 vad_idx = next_idx
                 next_idx += 1
 
         # 3. Assemble filter_complex_script lines
-        fg: list[str] = [f"[0:v]trim=duration={clip_dur:.3f},setpts=PTS-STARTPTS[v_base]"]
+        fg: list[str] = [
+            f"[0:v]setpts=PTS-STARTPTS,trim=duration={clip_dur:.3f},setpts=PTS-STARTPTS[v_base]"
+        ]
         if source_has_audio:
             fg.append(
-                f"[0:a]atrim=duration={clip_dur:.3f},asetpts=PTS-STARTPTS,"
+                f"[0:a]asetpts=PTS-STARTPTS,atrim=duration={clip_dur:.3f},asetpts=PTS-STARTPTS,"
                 "aformat=sample_rates=48000:channel_layouts=stereo[a_base]"
             )
         else:

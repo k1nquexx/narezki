@@ -78,7 +78,7 @@
 
 ---
 
-### [BUG-24] `MAJOR` — Сломанный OAuth2 (YouTube / TikTok / Instagram) в Tauri: случайный порт в `redirect_uri` и `window.open()` вместо системного браузера
+### [BUG-24] `MAJOR` `[FIXED]` — Сломанный OAuth2 (YouTube / TikTok / Instagram) в Tauri: случайный порт в `redirect_uri` и `window.open()` вместо системного браузера
 - **Файл и строка:** `backend/app/api/publishing.py:139, 179`, `src-tauri/src/lib.rs:37-42`, `src/pages/SettingsPage.tsx:129-138`
 - **Суть проблемы:**
   1. Tauri при каждом запуске выбирает случайный свободный порт (`TcpListener::bind("127.0.0.1:0")`). Эндпоинты `/api/publishing/oauth/{platform}/url` и `/callback` формируют `redirect_uri` из `str(request.base_url)` (например, `http://127.0.0.1:54321/...`), игнорируя `settings.publish_public_base_url`. Поскольку YouTube, TikTok и Instagram требуют точного совпадения заранее зарегистрированного `redirect_uri` (а TikTok/Instagram — ещё и HTTPS), OAuth2-авторизация будет стабильно падать с `redirect_uri_mismatch`.

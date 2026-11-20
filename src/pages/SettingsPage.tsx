@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "../lib/api";
-import { isTauriRuntime, pickDirectory, pickWeightsFile } from "../lib/tauri";
+import { isTauriRuntime, openExternalUrl, pickDirectory, pickWeightsFile } from "../lib/tauri";
 import { useAppStore } from "../store/useAppStore";
 import type {
   AppSettings,
@@ -129,12 +129,12 @@ export function SettingsPage() {
   const handleStartOAuth = async (platform: SocialPlatform) => {
     try {
       await saveSettings(form);
-      const { url } = await api.getOAuthUrl(platform);
-      window.open(url, "_blank", "noopener,noreferrer");
+      const { url, redirect_uri } = await api.getOAuthUrl(platform);
+      await openExternalUrl(url);
       addToast({
         type: "info",
         title: `Открыта авторизация ${platform}`,
-        message: "Подтвердите доступ в браузере и нажмите «Обновить»",
+        message: `Подтвердите доступ в браузере (Callback: ${redirect_uri}) и нажмите «Обновить»`,
       });
     } catch (err) {
       addToast({
@@ -625,6 +625,13 @@ export function SettingsPage() {
               <h2 className="text-sm font-semibold text-white">
                 OAuth2 приложения платформ (YouTube / TikTok / Instagram)
               </h2>
+              <p className="text-[11px] text-zinc-400">
+                Redirect URI для консоли разработчика:{" "}
+                <code className="px-1.5 py-0.5 rounded bg-surface-950 border border-surface-800 text-zinc-200 select-all">
+                  {(form.publish_public_base_url || "http://127.0.0.1:8765").replace(/\/+$/, "")}
+                  /api/publishing/oauth/{"{youtube|tiktok|instagram}"}/callback
+                </code>
+              </p>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="p-3 rounded-lg bg-surface-950 border border-surface-800 space-y-2">
@@ -917,14 +924,14 @@ export function SettingsPage() {
 
                       <div className="flex items-center gap-1.5">
                         {item.remote_url && (
-                          <a
-                            href={item.remote_url}
-                            target="_blank"
-                            rel="noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => void openExternalUrl(item.remote_url!)}
+                            title="Открыть опубликованный ролик в браузере"
                             className="p-1.5 rounded bg-surface-800 hover:bg-surface-700 border border-surface-700 text-emerald-300"
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
+                          </button>
                         )}
                         {(item.status === "failed" || item.status === "cancelled") && (
                           <button

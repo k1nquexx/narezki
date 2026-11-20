@@ -38,6 +38,14 @@ export async function openInExplorer(path: string): Promise<void> {
   await invoke("open_in_explorer", { path });
 }
 
+export async function openExternalUrl(url: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  await invoke("open_external_url", { url });
+}
+
 export async function listenBackendRestart(
   callback: (info: BackendInfo) => void
 ): Promise<UnlistenFn | null> {

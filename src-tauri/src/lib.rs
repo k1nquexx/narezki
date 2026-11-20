@@ -36,6 +36,9 @@ struct BackendState {
 }
 
 fn find_free_port() -> u16 {
+    if TcpListener::bind("127.0.0.1:8765").is_ok() {
+        return 8765;
+    }
     TcpListener::bind("127.0.0.1:0")
         .and_then(|listener| listener.local_addr())
         .map(|addr| addr.port())
@@ -295,6 +298,42 @@ fn open_in_explorer(path: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err("Only http:// and https:// URLs are allowed".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = Command::new("rundll32");
+        cmd.args(["url.dll,FileProtocolHandler", trimmed])
+            .creation_flags(CREATE_NO_WINDOW);
+        cmd.spawn()
+            .map_err(|e| format!("Failed to open URL in system browser: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(trimmed)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL in system browser: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(trimmed)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL in system browser: {}", e))?;
+        return Ok(());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let port = find_free_port();
@@ -312,7 +351,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_backend_info,
             restart_backend,
-            open_in_explorer
+            open_in_explorer,
+            open_external_url
         ])
         .setup(move |app| {
             #[cfg(not(debug_assertions))]

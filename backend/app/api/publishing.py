@@ -126,6 +126,14 @@ async def delete_social_account(account_id: str, db: AsyncSession = Depends(get_
     return {"ok": True}
 
 
+def _resolve_oauth_redirect_uri(platform: str, request: Request, public_base_url: str) -> str:
+    """Resolve OAuth2 redirect_uri preferring configured public_base_url over ephemeral local request URL."""
+    base = (public_base_url or "").strip().rstrip("/")
+    if base and base != "http://127.0.0.1:8765":
+        return f"{base}/api/publishing/oauth/{platform}/callback"
+    return str(request.base_url).rstrip("/") + f"/api/publishing/oauth/{platform}/callback"
+
+
 @router.get("/oauth/{platform}/url")
 async def get_oauth_authorize_url(
     platform: str,
@@ -136,7 +144,7 @@ async def get_oauth_authorize_url(
     if plat not in _VALID_PLATFORMS:
         raise HTTPException(status_code=400, detail="Поддерживаются платформы: youtube, tiktok, instagram")
     settings = await load_settings(db)
-    redirect_uri = str(request.base_url).rstrip("/") + f"/api/publishing/oauth/{plat}/callback"
+    redirect_uri = _resolve_oauth_redirect_uri(plat, request, settings.publish_public_base_url)
     _prune_states()
     state = secrets.token_urlsafe(24)
     _oauth_states[state] = (plat, time.time() + 600.0)
@@ -176,7 +184,7 @@ async def oauth_callback(
         )
 
     settings = await load_settings(db)
-    redirect_uri = str(request.base_url).rstrip("/") + f"/api/publishing/oauth/{plat}/callback"
+    redirect_uri = _resolve_oauth_redirect_uri(plat, request, settings.publish_public_base_url)
     try:
         account_name, creds = await exchange_oauth_code(plat, code, settings, redirect_uri)
         existing = (

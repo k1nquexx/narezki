@@ -261,7 +261,7 @@ fn open_in_explorer(path: String) -> Result<(), String> {
             .trim_start_matches(r"\\?\")
             .replace('/', "\\");
         if target.is_file() {
-            cmd.arg(format!("/select,{}", clean));
+            cmd.raw_arg(format!("/select,\"{}\"", clean));
         } else {
             cmd.arg(&clean);
         }

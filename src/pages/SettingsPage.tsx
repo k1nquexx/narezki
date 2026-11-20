@@ -936,9 +936,20 @@ export function SettingsPage() {
                         {(item.status === "failed" || item.status === "cancelled") && (
                           <button
                             type="button"
-                            onClick={() =>
-                              void api.retryPublishItem(item.id).then(() => refreshPublishing())
-                            }
+                            onClick={() => {
+                              void (async () => {
+                                try {
+                                  await api.retryPublishItem(item.id);
+                                  await refreshPublishing();
+                                } catch (err) {
+                                  addToast({
+                                    type: "error",
+                                    title: "Не удалось повторить публикацию",
+                                    message: err instanceof Error ? err.message : String(err),
+                                  });
+                                }
+                              })();
+                            }}
                             title="Повторить сейчас"
                             className="p-1.5 rounded bg-surface-800 hover:bg-surface-700 border border-surface-700 text-zinc-200"
                           >
@@ -948,9 +959,20 @@ export function SettingsPage() {
                         {item.status === "scheduled" && (
                           <button
                             type="button"
-                            onClick={() =>
-                              void api.cancelPublishItem(item.id).then(() => refreshPublishing())
-                            }
+                            onClick={() => {
+                              void (async () => {
+                                try {
+                                  await api.cancelPublishItem(item.id);
+                                  await refreshPublishing();
+                                } catch (err) {
+                                  addToast({
+                                    type: "error",
+                                    title: "Не удалось отменить публикацию",
+                                    message: err instanceof Error ? err.message : String(err),
+                                  });
+                                }
+                              })();
+                            }}
                             title="Отменить"
                             className="p-1.5 rounded bg-surface-800 hover:bg-amber-500/20 border border-surface-700 text-amber-300"
                           >
@@ -959,9 +981,20 @@ export function SettingsPage() {
                         )}
                         <button
                           type="button"
-                          onClick={() =>
-                            void api.deletePublishItem(item.id).then(() => refreshPublishing())
-                          }
+                          onClick={() => {
+                            void (async () => {
+                              try {
+                                await api.deletePublishItem(item.id);
+                                await refreshPublishing();
+                              } catch (err) {
+                                addToast({
+                                  type: "error",
+                                  title: "Не удалось удалить элемент очереди",
+                                  message: err instanceof Error ? err.message : String(err),
+                                });
+                              }
+                            })();
+                          }}
                           title="Удалить из истории"
                           className="p-1.5 rounded bg-surface-800 hover:bg-rose-500/20 border border-surface-700 text-zinc-400 hover:text-rose-300"
                         >

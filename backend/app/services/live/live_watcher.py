@@ -1448,13 +1448,17 @@ class LiveWatcherManager:
                     if now - last < max(15, int(ch.check_interval_sec)):
                         continue
                     self._last_checked[ch.id] = now
-                    with contextlib.suppress(Exception):
+                    try:
                         probe = await check_channel_live(ch.platform, ch.channel_url)
                         async with AsyncSessionLocal() as db:
                             row_res = await db.execute(select(LiveChannel).where(LiveChannel.id == ch.id))
                             row = row_res.scalar_one_or_none()
                             if row:
-                                row.status = "online" if probe["is_live"] else "offline"
+                                row.status = (
+                                    "online"
+                                    if probe["is_live"]
+                                    else ("error" if probe.get("error") else "offline")
+                                )
                                 row.stream_title = str(probe.get("stream_title") or "")
                                 row.viewer_count = probe.get("viewer_count")
                                 row.last_error = probe.get("error")
@@ -1462,6 +1466,8 @@ class LiveWatcherManager:
                                 await db.commit()
                         if probe["is_live"]:
                             await self.start_channel(ch.id)
+                    except Exception as poll_exc:
+                        logger.warning("Live poll failed for channel %s: %s", ch.id, poll_exc)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

@@ -190,7 +190,7 @@
 
 ---
 
-### [BUG-34] `MINOR` — Необработанные промисы в `SettingsPage.tsx`, мелкие расхождения статусов, утечка старых файлов рекламы и кавычки `explorer.exe` на Windows
+### [BUG-34] `MINOR` `[FIXED]` — Необработанные промисы в `SettingsPage.tsx`, мелкие расхождения статусов, утечка старых файлов рекламы и кавычки `explorer.exe` на Windows
 - **Файлы и строки:**
   - `src/pages/SettingsPage.tsx:932-957`: вызовы `api.retryPublishItem`, `api.cancelPublishItem` и `api.deletePublishItem` не имеют `.catch(...)` — ошибки уходят в unhandled promise rejection без уведомления пользователя.
   - `backend/app/services/analyzer/pipeline.py:286-289`: при отмене анализа БД восстанавливает `proj.status = "analyzed" if proj.analysis_json else "ready"`, но WebSocket-событие на строке 289 всегда отправляет `"ready"`.

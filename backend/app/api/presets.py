@@ -234,16 +234,19 @@ async def update_ad_preset(
     if preset is None:
         raise HTTPException(status_code=404, detail="Рекламный пресет не найден")
 
+    old_asset = Path(preset.asset_path) if preset.asset_path else None
+    new_asset_copied = False
     updates = filter_non_nullable_updates(AdPreset, body.model_dump(exclude_unset=True))
     if "asset_path" in updates and updates["asset_path"]:
         src = Path(updates["asset_path"])
         if not src.exists():
             raise HTTPException(status_code=400, detail="Указанный файл рекламы не найден")
-        if src.resolve() != Path(preset.asset_path).resolve():
+        if old_asset is None or src.resolve() != old_asset.resolve():
             ensure_data_dirs()
             dest = ADS_DIR / f"{preset.id}_{src.name}"
             await asyncio.to_thread(shutil.copy2, src, dest)
             updates["asset_path"] = str(dest)
+            new_asset_copied = True
             if (updates.get("ad_type") or preset.ad_type) == "video_insert":
                 updates["duration"] = await _probe_duration_if_video(dest)
 
@@ -251,6 +254,16 @@ async def update_ad_preset(
         setattr(preset, k, v)
     await db.commit()
     await db.refresh(preset)
+
+    if new_asset_copied and old_asset is not None:
+        try:
+            old_resolved = old_asset.resolve()
+            new_resolved = Path(preset.asset_path).resolve()
+            if old_resolved != new_resolved and old_asset.exists() and ADS_DIR.resolve() in old_resolved.parents:
+                old_asset.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     return AdPresetOut.model_validate(preset)
 
 

@@ -280,13 +280,15 @@ async def run_analysis_pipeline(ctx: JobContext) -> dict[str, Any]:
         }
 
     except (JobCancelledError, asyncio.CancelledError):
+        restored_status = "ready"
         async with AsyncSessionLocal() as session:
             proj = await session.get(Project, project_id)
             if proj is not None:
-                proj.status = "analyzed" if proj.analysis_json else "ready"
+                restored_status = "analyzed" if proj.analysis_json else "ready"
+                proj.status = restored_status
                 proj.error_message = None
                 await session.commit()
-        await ws_manager.emit_project_update(project_id, "ready")
+        await ws_manager.emit_project_update(project_id, restored_status)
         raise
     except Exception as exc:
         async with AsyncSessionLocal() as session:

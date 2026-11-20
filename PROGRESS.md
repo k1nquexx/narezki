@@ -143,22 +143,69 @@ narezki/
 
 ---
 
-## Команды запуска и проверки
+## Стабилизация Раунд 2 (`BUG-21`..`BUG-34`)
+
+Все 14 багов второго раунда аудита из [BUG_REPORT.md](file:///f:/projects/narezki/BUG_REPORT.md) (3 `CRITICAL`, 9 `MAJOR`, 2 `MINOR`) исправлены атомарными коммитами и проверены реальным запуском:
+
+- **`CRITICAL` (`BUG-21`..`BUG-23`):**
+  - `BUG-21`: пропуск `loudnorm` на коротких (< 1.5с) и беззвучных клипах/рекламе (устранён краш AAC `NaN/+-Inf`), валидация границ клипа относительно длительности исходника и пост-рендер проверка видеопотока.
+  - `BUG-22`: безопасное извлечение окна в `RollingBufferManager.extract_window()` (`-ss` до `-i`, условный `-bsf:a aac_adtstoasc`, проверка видеопотока + фолбэк на быстрое перекодирование `libx264 ultrafast`).
+  - `BUG-23`: добавление `requirements-cpu.txt` в `bundle.resources` (`tauri.conf.json`), передача пользовательской `app_data_dir()` через `NAREZKI_DATA_DIR` в release-сборках Tauri и привязка `MODELS_DIR` к `DATA_DIR`.
+- **`MAJOR` (`BUG-24`..`BUG-32`):**
+  - `BUG-24`: детерминированный порт `8765` (с фолбэком на свободный), приоритет `publish_public_base_url` в OAuth2 `redirect_uri`, отображение callback URI в UI и открытие внешних ссылок в системном браузере через Rust-команду `open_external_url`.
+  - `BUG-25`: отправка `emit_project_update` при создании Live-проекта, обновление списка проектов перед открытием Студии и защита `refreshClips` от перезаписи клипов другого проекта.
+  - `BUG-26`: гарантированное `proc.kill()` + `await proc.wait()` при таймаутах и `asyncio.CancelledError` в `live_watcher.py`, `ffmpeg_runner.py`, `audio_peaks.py`, `proxy.py`.
+  - `BUG-27`: проверка наличия аудиодорожки в Live-потоке перед добавлением PCM-выхода (video-only стримы больше не роняют FFmpeg) и логирование ошибок авто-клиппинга без сжигания кулдауна.
+  - `BUG-28`: ограничение роста `segments.csv` через `-segment_list_size`, вынос сканирования/очистки буфера и `shutil.rmtree` в `asyncio.to_thread` с кэшированным `snapshot()`.
+  - `BUG-29`: явное исключение при таймауте поллинга TikTok/Instagram, защита от перезаписи `cancelled` (и HTTP 409 при отмене `posting`), безопасный парсер `expires_at=None` и проверка непустого файла.
+  - `BUG-30`: единый `filter_non_nullable_updates()` через SQLAlchemy `inspect()` во всех `PATCH`-эндпоинтах (`live`, `publishing`, `presets`, `clips`).
+  - `BUG-31`: ожидание кооперативного завершения активных `handler_task` в `QueueManager.stop()` до `release_vram_async("shutdown")` и использование `run_cancellable_thread` в `downloader.py`.
+  - `BUG-32`: сброс PTS (`setpts=PTS-STARTPTS` / `asetpts=PTS-STARTPTS`) до `trim`/`atrim` и в `build_overlay_filtergraph()`, а также `require_video=True` для `video_insert`.
+- **`MINOR` (`BUG-33`..`BUG-34`):**
+  - `BUG-33`: монотонный агрегированный прогресс в `handle_export_batch` и обязательная валидация трекинга в `_render_or_export_single`.
+  - `BUG-34`: обработка ошибок очереди публикаций в `SettingsPage.tsx`, корректный `restored_status` при отмене анализа, статус `"error"` и логирование в `_poll_loop`, очистка старого файла рекламы в `ADS_DIR` и корректное экранирование `/select,"..."` через `raw_arg` для `explorer.exe` на Windows.
+
+### Итоговая верификация Раунда 2 (2026-11-20)
+- **Backend (`pytest -v`):** **`34 passed in 68.70s`** (0 ошибок, 0 пропусков).
+- **Frontend (`tsc --noEmit`, `eslint .`, `vite build`):** 0 ошибок, 0 предупреждений (`dist/assets/index-Cax_M8Mv.js`, `308.58 kB`, собрано за `2.99s`).
+- **Tauri / Rust (`cargo check` & `cargo check --release`):** 0 ошибок.
+- **Сквозной Smoke Test (живой FastAPI на `127.0.0.1:18766`, русский язык):**
+  - `import-local` → создание клипа с кириллическими субтитрами `.ass` (караоке), 3-секундным русским хуком и Anti-CID → `export` в `.mp4` + `.txt`.
+  - Проверка через `backend/bin/ffprobe.exe`: `1080×1920`, видео `h264`, аудио `aac` `48000 Hz`, длительность `6.500s` (> 5с), размер `6,782,692` байт, сопутствующий UTF-8 `.txt` создан.
+  - Лог `uvicorn`: **0 ошибок, 0 traceback**.
+
+---
+
+## Команды запуска и проверки (Windows)
 
 ```powershell
+# 0. Первый запуск (установка зависимостей)
+cd F:\projects\narezki
+npm.cmd install
+cd F:\projects\narezki\backend
+python -m venv .venv
+.\.venv\Scripts\pip.exe install -r requirements.txt
+
 # 1. Запуск десктопного приложения (Tauri v2 + Vite + автозапуск FastAPI из .venv)
 cd F:\projects\narezki
 npm.cmd run tauri dev
 
-# 2. Сборка продакшен-фронтенда и проверка типов TypeScript
+# 2. Сборка продакшен-фронтенда, проверка типов TypeScript и ESLint
 cd F:\projects\narezki
+npx.cmd tsc --noEmit
+npm.cmd run lint
 npm.cmd run build
 
-# 3. Автономный запуск Python FastAPI бэкенда
+# 3. Проверка/сборка Tauri (Rust)
+cd F:\projects\narezki\src-tauri
+cargo check
+
+# 4. Автономный запуск Python FastAPI бэкенда (UTF-8, порт 8765)
 cd F:\projects\narezki\backend
+$env:PYTHONUTF8 = "1"
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 
-# 4. Запуск интеграционных тестов бэкенда
+# 5. Запуск всех интеграционных и регрессионных тестов бэкенда
 cd F:\projects\narezki\backend
 .\.venv\Scripts\pytest.exe -v
 ```

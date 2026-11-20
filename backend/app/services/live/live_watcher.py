@@ -433,6 +433,7 @@ def build_live_ffmpeg_cmd(
     seg_pattern: str,
     csv_path: str,
     segment_seconds: int,
+    segment_list_size: Optional[int] = None,
     include_reconnect: bool = True,
 ) -> list[str]:
     """Build the FFmpeg command for LiveStreamSession ring buffer (+ optional PCM audio pipe)."""
@@ -460,16 +461,18 @@ def build_live_ffmpeg_cmd(
         cmd.extend([*audio_reconnect, "-i", audio_url, "-map", "0:v:0", "-map", "1:a:0"])
 
     # Output 1: rolling MPEG-TS ring buffer
-    cmd.extend([
+    seg_args = [
         "-c", "copy",
         "-f", "segment",
         "-segment_time", str(segment_seconds),
         "-segment_format", "mpegts",
         "-segment_list", csv_path,
         "-segment_list_type", "csv",
-        "-reset_timestamps", "1",
-        seg_pattern,
-    ])
+    ]
+    if segment_list_size is not None and segment_list_size > 0:
+        seg_args.extend(["-segment_list_size", str(int(segment_list_size))])
+    seg_args.extend(["-reset_timestamps", "1", seg_pattern])
+    cmd.extend(seg_args)
 
     # Output 2: live 16kHz mono s16le PCM to stdout for audio energy spike detection (only if audio exists)
     if has_audio:
@@ -499,6 +502,21 @@ class RollingBufferManager:
         self.segment_seconds = max(2, int(segment_seconds))
         self.playlist_path = self.buffer_dir / "segments.csv"
         self.buffer_dir.mkdir(parents=True, exist_ok=True)
+        self._cached_stats: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+    @property
+    def cached_stats(self) -> tuple[float, float, float]:
+        """Return last refreshed (earliest_sec, latest_sec, disk_mb) without blocking disk I/O."""
+        return self._cached_stats
+
+    def refresh_stats(self) -> tuple[float, float, float]:
+        """Scan segments and disk usage in a single pass and update cached_stats."""
+        segments = self.scan_segments()
+        earliest = segments[0].start_sec if segments else 0.0
+        latest = segments[-1].end_sec if segments else 0.0
+        disk_mb = self.get_disk_usage_mb()
+        self._cached_stats = (earliest, latest, disk_mb)
+        return self._cached_stats
 
     def scan_segments(self) -> list[SegmentEntry]:
         """Parse FFmpeg segment CSV entries that currently exist on disk."""
@@ -772,14 +790,13 @@ class LiveStreamSession:
     def snapshot(self) -> dict[str, Any]:
         recent_audio = [round(db, 1) for _, db in list(self._audio_db_history)[-40:]]
         recent_chat = self.chat_analyzer.get_recent_series(self._current_sec, window_sec=40)
-        latest_t = self.buffer_manager.get_latest_time()
-        earliest_t = self.buffer_manager.get_earliest_time()
+        earliest_t, latest_t, disk_mb = self.buffer_manager.cached_stats
         return {
             "channel_id": self.channel_id,
             "status": self._status,
             "stream_seconds": round(latest_t, 1),
             "buffer_span_sec": round(max(0.0, latest_t - earliest_t), 1),
-            "buffer_disk_mb": self.buffer_manager.get_disk_usage_mb(),
+            "buffer_disk_mb": disk_mb,
             "clips_created": self._clips_created,
             "audio_db_recent": recent_audio,
             "chat_rate_recent": recent_chat,
@@ -874,6 +891,10 @@ class LiveStreamSession:
             if not has_audio:
                 logger.info("Live Monitor: поток %s без аудиодорожки — отключаем PCM-анализ", ch.name)
 
+            seg_list_size = max(
+                20,
+                (self.buffer_manager.buffer_minutes * 60 // self.buffer_manager.segment_seconds) + 20,
+            )
             cmd = build_live_ffmpeg_cmd(
                 ffmpeg=ffmpeg,
                 video_url=video_url,
@@ -882,6 +903,7 @@ class LiveStreamSession:
                 seg_pattern=seg_pattern,
                 csv_path=csv_path,
                 segment_seconds=self.buffer_manager.segment_seconds,
+                segment_list_size=seg_list_size,
             )
 
             self._proc = await asyncio.create_subprocess_exec(
@@ -1066,7 +1088,7 @@ class LiveStreamSession:
             await asyncio.sleep(1.0)
             tick += 1
             if tick % 10 == 0:
-                self.buffer_manager.prune_old_segments()
+                await asyncio.to_thread(self.buffer_manager.prune_old_segments)
 
             ch = await self._load_channel()
             if not ch:
@@ -1076,7 +1098,7 @@ class LiveStreamSession:
             self._min_clip_gap_sec = int(ch.min_clip_gap_sec)
 
             cur_sec = self._get_current_sec()
-            latest_buf_sec = self.buffer_manager.get_latest_time()
+            _, latest_buf_sec, _ = await asyncio.to_thread(self.buffer_manager.refresh_stats)
             audio_ratio, recent_db = self._compute_audio_jump_ratio()
 
             chat_spike = self.chat_analyzer.evaluate_pulse(
@@ -1160,7 +1182,7 @@ class LiveStreamSession:
 
     async def clip_last_seconds(self, seconds: float = 45.0) -> dict[str, Any]:
         """Manually slice the last N seconds from the rolling buffer into a full Live Clip job."""
-        latest = self.buffer_manager.get_latest_time()
+        _, latest, _ = await asyncio.to_thread(self.buffer_manager.refresh_stats)
         if latest <= 3.0:
             raise RuntimeError("Буфер ещё не накопил достаточно видео (подождите 6–10 секунд)")
         start_sec = max(0.0, latest - float(seconds))

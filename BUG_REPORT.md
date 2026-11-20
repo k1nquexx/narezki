@@ -122,7 +122,7 @@
 
 ---
 
-### [BUG-28] `MAJOR` — Блокировка asyncio event loop синхронным I/O и неограниченный рост `segments.csv` в Live Monitor
+### [BUG-28] `MAJOR` `[FIXED]` — Блокировка asyncio event loop синхронным I/O и неограниченный рост `segments.csv` в Live Monitor
 - **Файл и строка:** `backend/app/services/live/live_watcher.py:357-420, 556-571, 865-866`, `backend/app/api/live.py:123`
 - **Суть проблемы:**
   1. `RollingBufferManager.prune_old_segments()` удаляет старые `.ts`-файлы с диска, но **никогда не очищает** файл `segments.csv` (FFmpeg дописывает туда строки бесконечно). При длительном стриме `segments.csv` разрастается до тысяч строк.

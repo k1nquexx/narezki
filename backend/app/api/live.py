@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
 from contextlib import suppress
 from typing import Any
@@ -120,7 +121,7 @@ async def delete_live_channel(channel_id: str, db: AsyncSession = Depends(get_db
     buf_dir = (LIVE_BUFFER_DIR / channel_id).resolve()
     if buf_dir.exists() and buf_root in buf_dir.parents:
         with suppress(OSError):
-            shutil.rmtree(buf_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, buf_dir, True)
 
     ch = await db.get(LiveChannel, channel_id)
     if ch is not None:

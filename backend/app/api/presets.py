@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import ADS_DIR, BACKGROUNDS_DIR, ensure_data_dirs
 from ..core.database import get_db
-from ..core.models import AdPreset, BackgroundAsset, SubtitlePreset, new_id
+from ..core.models import AdPreset, BackgroundAsset, SubtitlePreset, filter_non_nullable_updates, new_id
 from ..core.schemas import (
     AdPresetCreate,
     AdPresetOut,
@@ -69,7 +69,7 @@ async def update_subtitle_preset(
     if preset is None:
         raise HTTPException(status_code=404, detail="Пресет субтитров не найден")
 
-    updates = body.model_dump(exclude_unset=True)
+    updates = filter_non_nullable_updates(SubtitlePreset, body.model_dump(exclude_unset=True))
     if updates.get("is_default"):
         all_rows = (await db.execute(select(SubtitlePreset))).scalars().all()
         for row in all_rows:
@@ -234,7 +234,7 @@ async def update_ad_preset(
     if preset is None:
         raise HTTPException(status_code=404, detail="Рекламный пресет не найден")
 
-    updates = body.model_dump(exclude_unset=True)
+    updates = filter_non_nullable_updates(AdPreset, body.model_dump(exclude_unset=True))
     if "asset_path" in updates and updates["asset_path"]:
         src = Path(updates["asset_path"])
         if not src.exists():

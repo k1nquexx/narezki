@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import is_safe_media_path
 from ..core.database import get_db, load_settings
-from ..core.models import PublishQueueItem, SocialAccount
+from ..core.models import PublishQueueItem, SocialAccount, filter_non_nullable_updates
 from ..core.schemas import (
     PublishEnqueueRequest,
     PublishQueueItemOut,
@@ -103,7 +103,7 @@ async def update_social_account(
     if acc is None:
         raise HTTPException(status_code=404, detail="Аккаунт не найден")
 
-    updates = body.model_dump(exclude_unset=True)
+    updates = filter_non_nullable_updates(SocialAccount, body.model_dump(exclude_unset=True))
     if "credentials_json" in updates and updates["credentials_json"] is not None:
         merged = dict(acc.credentials_json or {})
         merged.update(updates.pop("credentials_json"))

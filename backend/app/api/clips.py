@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import EXPORTS_DIR, PROJECTS_DIR
 from ..core.database import get_db
-from ..core.models import Clip, Project, SubtitlePreset
+from ..core.models import Clip, Project, filter_non_nullable_updates, SubtitlePreset
 from ..core.queue_manager import queue_manager
 from ..core.schemas import ClipCreate, ClipOut, ClipUpdate, JobOut
 from ..services.analyzer.llm_highlights import build_clip_subtitles
@@ -103,7 +103,7 @@ async def update_clip(
     if clip is None:
         raise HTTPException(status_code=404, detail="Клип не найден")
 
-    updates = body.model_dump(exclude_unset=True)
+    updates = filter_non_nullable_updates(Clip, body.model_dump(exclude_unset=True))
     for field in _NON_NULLABLE_UPDATE_FIELDS:
         if field in updates and updates[field] is None:
             updates.pop(field, None)

@@ -148,7 +148,7 @@
 
 ---
 
-### [BUG-30] `MAJOR` — HTTP 500 (`IntegrityError`) при передаче `null` в `PATCH`-эндпоинтах `live`, `publishing`, `presets` и `clips`
+### [BUG-30] `MAJOR` `[FIXED]` — HTTP 500 (`IntegrityError`) при передаче `null` в `PATCH`-эндпоинтах `live`, `publishing`, `presets` и `clips`
 - **Файл и строка:** `backend/app/api/live.py:93-105`, `backend/app/api/publishing.py:106-113`, `backend/app/api/presets.py:72-80, 237-252`, `backend/app/api/clips.py:81-93`
 - **Суть проблемы:** В `PATCH /api/live/channels/{id}`, `PATCH /api/publishing/accounts/{id}`, `PATCH /api/presets/subtitles/{id}` и `PATCH /api/presets/ads/{id}` используется `updates = body.model_dump(exclude_unset=True)` с последующим `setattr(obj, key, val)` без фильтрации `None` для не-nullable столбцов SQLite (`name`, `enabled`, `font_size`, `ad_type`, `post_gap_minutes` и др.). Передача явного `null` приводит к `sqlalchemy.exc.IntegrityError` (HTTP 500). В `backend/app/api/clips.py:81-93` список `_NON_NULLABLE_UPDATE_FIELDS` неполный — в нём пропущены `NOT NULL` поля `virality_score`, `category`, `reason` и `subtitles_json`.
 - **План исправления:** Во всех `PATCH`-эндпоинтах отбрасывать ключи со значением `None` для всех не-nullable колонок (либо инспектировать `col.nullable` из SQLAlchemy `inspect(model).columns`), дополнив `_NON_NULLABLE_UPDATE_FIELDS` в `clips.py`.

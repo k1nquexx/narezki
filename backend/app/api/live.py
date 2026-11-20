@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import LIVE_BUFFER_DIR
 from ..core.database import get_db
-from ..core.models import Clip, LiveChannel, Project
+from ..core.models import Clip, LiveChannel, Project, filter_non_nullable_updates
 from ..core.schemas import (
     ClipOut,
     LiveChannelCreate,
@@ -91,7 +91,7 @@ async def update_live_channel(
     if ch is None:
         raise HTTPException(status_code=404, detail="Канал не найден")
 
-    updates = body.model_dump(exclude_unset=True)
+    updates = filter_non_nullable_updates(LiveChannel, body.model_dump(exclude_unset=True))
     if "channel_url" in updates and updates["channel_url"]:
         try:
             platform, normalized_url = normalize_channel_url(updates["channel_url"], None)

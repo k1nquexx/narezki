@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, inspect as sa_inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -18,6 +18,17 @@ def new_id() -> str:
 
 class Base(DeclarativeBase):
     pass
+
+
+def filter_non_nullable_updates(model_cls: type[Base], updates: dict[str, Any]) -> dict[str, Any]:
+    """Drop explicit None values for columns declared NOT NULL on the SQLAlchemy model."""
+    mapper = sa_inspect(model_cls)
+    non_nullable = {col.key for col in mapper.columns if not col.nullable}
+    return {
+        k: v
+        for k, v in updates.items()
+        if not (v is None and k in non_nullable)
+    }
 
 
 class Project(Base):

@@ -179,7 +179,7 @@
 
 ---
 
-### [BUG-33] `MINOR` — Прыгающий прогресс-бар в `handle_export_batch` и пропуск валидации устаревшего трекинга в `_render_or_export_single`
+### [BUG-33] `MINOR` `[FIXED]` — Прыгающий прогресс-бар в `handle_export_batch` и пропуск валидации устаревшего трекинга в `_render_or_export_single`
 - **Файл и строка:** `backend/app/services/renderer/handlers.py:297, 464-487`
 - **Суть проблемы:**
   1. В `handle_export_batch()` клипы экспортируются параллельно через `asyncio.gather()`, но каждый `_export_one` передаёт в `_render_or_export_single` свой `progress_offset = idx * span`. В результате при 2+ воркерах `ctx.update_progress()` получает немонотонные значения (`12% -> 58% -> 18% -> 64%`), и прогресс-бар в UI скачет вперёд-назад.

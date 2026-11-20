@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from ...core.config import EXPORTS_DIR, get_project_dir
 from ...core.cuda_env import vram_guard
@@ -285,6 +285,7 @@ async def _render_or_export_single(
     explicit_output: Optional[Path] = None,
     progress_offset: float = 0.0,
     progress_span: float = 100.0,
+    on_progress: Optional[Callable[[float, str, str], Awaitable[None]]] = None,
 ) -> dict[str, Any]:
     bundle = await _load_render_bundle(clip_id)
     project: Project = bundle["project"]
@@ -292,25 +293,32 @@ async def _render_or_export_single(
     settings = bundle["settings"]
     clip_dict: dict[str, Any] = bundle["clip_dict"]
 
+    async def _emit(local_pct: float, stage: str, msg: str) -> None:
+        clamped = max(0.0, min(100.0, float(local_pct)))
+        if on_progress is not None:
+            await on_progress(clamped, stage, msg)
+        else:
+            await ctx.update_progress(
+                progress_offset + progress_span * (clamped / 100.0),
+                stage,
+                msg,
+            )
+
     try:
-        # Step A: Ensure tracking if auto_track (0% -> 30% of span)
-        if clip.crop_mode == "auto_track" and not clip_dict.get("track_data_json"):
+        # Step A: Always validate/ensure tracking for auto_track (handles empty/stale track_data_json)
+        if clip.crop_mode == "auto_track":
             async def _tp(pct: float, msg: str) -> None:
-                await ctx.update_progress(
-                    progress_offset + progress_span * 0.30 * (pct / 100.0),
-                    "tracking",
-                    msg,
-                )
+                await _emit(30.0 * (pct / 100.0), "tracking", msg)
 
             track_data = await _ensure_clip_tracking(
                 ctx, project, clip, settings.model_dump(), force=False, progress_cb=_tp
             )
             clip_dict["track_data_json"] = track_data
-            render_start_pct = progress_offset + progress_span * 0.30
-            render_span = progress_span * 0.70
+            render_local_start = 30.0
+            render_local_span = 70.0
         else:
-            render_start_pct = progress_offset
-            render_span = progress_span
+            render_local_start = 0.0
+            render_local_span = 100.0
 
         async with AsyncSessionLocal() as session:
             c = await session.get(Clip, clip_id)
@@ -331,11 +339,7 @@ async def _render_or_export_single(
             out_mp4 = get_project_dir(project.id) / "previews" / f"{clip_id}_preview.mp4"
 
         async def _rp(pct: float, msg: str) -> None:
-            await ctx.update_progress(
-                render_start_pct + render_span * (pct / 100.0),
-                "render",
-                msg,
-            )
+            await _emit(render_local_start + render_local_span * (pct / 100.0), "render", msg)
 
         async with ctx.render_semaphore:
             await render_clip(
@@ -343,6 +347,7 @@ async def _render_or_export_single(
                 source_width=project.width,
                 source_height=project.height,
                 source_has_audio=project.has_audio,
+                source_duration=project.duration,
                 clip_data=clip_dict,
                 output_path=out_mp4,
                 subtitle_preset=bundle["sub_dict"],
@@ -454,30 +459,43 @@ async def handle_export_batch(ctx: JobContext) -> dict[str, Any]:
     batch_dir.mkdir(parents=True, exist_ok=True)
 
     total = len(clip_ids)
-    span = 100.0 / total
+    per_clip_progress = [0.0] * total
+    max_reported = 0.0
     reserved_paths: set[Path] = set()
     targets = [
         (idx, cid, _next_batch_output_path(batch_dir, idx, cid, reserved_paths))
         for idx, cid in enumerate(clip_ids)
     ]
 
+    async def _report_clip_progress(idx: int, pct: float, stage: str, msg: str) -> None:
+        nonlocal max_reported
+        per_clip_progress[idx] = max(per_clip_progress[idx], max(0.0, min(100.0, pct)))
+        overall = sum(per_clip_progress) / total
+        if overall >= max_reported:
+            max_reported = overall
+            await ctx.update_progress(max_reported, stage, msg)
+
     async def _export_one(idx: int, cid: str, out_mp4: Path) -> tuple[bool, dict[str, Any]]:
         ctx.check_cancelled()
         await ctx.log(f"Батч-экспорт [{idx + 1}/{total}] -> {out_mp4.name}")
         try:
+            async def _on_prog(pct: float, stage: str, msg: str) -> None:
+                await _report_clip_progress(idx, pct, stage, msg)
+
             res = await _render_or_export_single(
                 ctx,
                 cid,
                 is_export=True,
                 explicit_output=out_mp4,
-                progress_offset=idx * span,
-                progress_span=span,
+                on_progress=_on_prog,
             )
+            await _report_clip_progress(idx, 100.0, "render", f"Экспортирован {out_mp4.name}")
             return True, res
         except (JobCancelledError, asyncio.CancelledError):
             raise
         except Exception as exc:
             err_msg = str(exc) or exc.__class__.__name__
+            await _report_clip_progress(idx, 100.0, "render", f"Ошибка клипа {cid}")
             await ctx.log(
                 f"Ошибка батч-экспорта клипа {cid} ({out_mp4.name}): {err_msg}",
                 level="error",

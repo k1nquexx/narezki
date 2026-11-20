@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from .cuda_env import get_gpu_info_async
 from .database import AsyncSessionLocal, load_settings
-from .models import Job
+from .models import Job, Project
 from .schemas import JobOut
 from .ws_manager import ws_manager
 
@@ -177,6 +177,13 @@ class QueueManager:
                 row.stage = "interrupted"
                 row.error = "Задача была прервана при прошлом завершении работы приложения."
                 row.finished_at = _utcnow()
+
+            # Reset projects stuck in "analyzing" after an unexpected shutdown
+            stale_projects = (
+                await session.execute(select(Project).where(Project.status == "analyzing"))
+            ).scalars().all()
+            for proj in stale_projects:
+                proj.status = "analyzed" if proj.analysis_json else "ready"
 
             # Re-enqueue pending queued jobs
             queued_rows = (

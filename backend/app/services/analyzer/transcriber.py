@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 import uuid
 from contextlib import suppress
@@ -93,6 +94,8 @@ def _transcribe_sync(
     cancel_event: Optional[asyncio.Event],
 ) -> dict[str, Any]:
     setup_cuda_dlls()
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     from faster_whisper import WhisperModel
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -256,6 +259,8 @@ async def transcribe_video(
             register_proc=register_proc,
             unregister_proc=unregister_proc,
         )
+        if on_progress:
+            await on_progress(5.0, f"Загрузка модели Whisper ({model_size})...")
         loop = asyncio.get_running_loop()
         return await run_cancellable_thread(
             _transcribe_sync,

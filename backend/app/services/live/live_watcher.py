@@ -469,7 +469,53 @@ class RollingBufferManager:
         offset = max(0.0, target_start - selected[0].start_sec)
         clip_duration = max(3.0, target_end - target_start)
 
-        cmd = [
+        # Check if first segment has AAC audio so we only apply aac_adtstoasc when appropriate
+        bsf_args: list[str] = []
+        try:
+            seg_meta = await probe_media(selected[0].path)
+            if seg_meta.get("has_audio") and str(seg_meta.get("audio_codec") or "").lower() == "aac":
+                bsf_args = ["-bsf:a", "aac_adtstoasc"]
+        except Exception:
+            pass
+
+        async def _run_extract_cmd(cmd_args: list[str]) -> tuple[int, bytes]:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                **_subprocess_kwargs(),
+            )
+            try:
+                _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+                return int(proc.returncode or 0), stderr_bytes
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                with contextlib.suppress(Exception):
+                    proc.kill()
+                with contextlib.suppress(Exception):
+                    await proc.wait()
+                raise
+
+        copy_cmd = [
+            ffmpeg,
+            "-y",
+            "-ss",
+            f"{offset:.3f}",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_path),
+            "-t",
+            f"{clip_duration:.3f}",
+            "-c",
+            "copy",
+            *bsf_args,
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+        reencode_cmd = [
             ffmpeg,
             "-y",
             "-f",
@@ -482,23 +528,47 @@ class RollingBufferManager:
             f"{offset:.3f}",
             "-t",
             f"{clip_duration:.3f}",
-            "-c",
-            "copy",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
             "-movflags",
             "+faststart",
             str(output_path),
         ]
+
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **_subprocess_kwargs(),
-            )
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
-            if proc.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
-                err = stderr.decode("utf-8", errors="replace")[-400:]
-                raise RuntimeError(f"Ошибка извлечения окна из буфера: {err}")
+            rc, stderr = await _run_extract_cmd(copy_cmd)
+            need_reencode = rc != 0 or not output_path.exists() or output_path.stat().st_size == 0
+            if not need_reencode:
+                try:
+                    out_meta = await probe_media(output_path, require_video=True)
+                    if float(out_meta.get("duration") or 0.0) <= 0.0:
+                        need_reencode = True
+                except Exception:
+                    need_reencode = True
+
+            if need_reencode:
+                logger.warning(
+                    "Stream-copy extract_window produced invalid/no-video output; falling back to fast re-encode"
+                )
+                with contextlib.suppress(OSError):
+                    output_path.unlink()
+                rc, stderr = await _run_extract_cmd(reencode_cmd)
+                if rc != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+                    err = stderr.decode("utf-8", errors="replace")[-400:]
+                    raise RuntimeError(f"Ошибка извлечения окна из буфера: {err}")
+                out_meta = await probe_media(output_path, require_video=True)
+                if float(out_meta.get("duration") or 0.0) <= 0.0:
+                    raise RuntimeError("Извлечённый фрагмент буфера имеет нулевую длительность")
         finally:
             with contextlib.suppress(OSError):
                 concat_path.unlink()

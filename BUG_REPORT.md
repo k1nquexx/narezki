@@ -58,7 +58,7 @@
 
 ---
 
-### [BUG-22] `CRITICAL` — Потеря видеопотока (audio-only MP4) в `RollingBufferManager.extract_window()` при нарезке из live-буфера
+### [BUG-22] `CRITICAL` `[FIXED]` — Потеря видеопотока (audio-only MP4) в `RollingBufferManager.extract_window()` при нарезке из live-буфера
 - **Файл и строка:** `backend/app/services/live/live_watcher.py:472-505`
 - **Суть проблемы:** В `extract_window()` команда FFmpeg использует `-f concat -i segments.concat.txt -ss <offset> -t <clip_duration> -c copy output.mp4` (`-ss` после `-i` в режиме `stream copy`). При stream copy FFmpeg отбрасывает все видеопакеты после `offset` до ближайшего IDR-ключевого кадра. Если ключевой кадр в сегментах редкий (или приходится после `offset + clip_duration`), в итоговый MP4 попадает **только аудиодорожка без единого видеокадра**. Подтверждено E2E-прогоном на реальных `.ts` сегментах: `probe_media(slice_path, require_video=True)` падает с `ValueError: Файл extracted.mp4 не содержит видеопотока`. Кроме того, копирование MPEG-TS (AAC ADTS) в MP4 без `-bsf:a aac_adtstoasc` может давать невалидный аудиопоток на части сборок FFmpeg.
 - **План исправления:**

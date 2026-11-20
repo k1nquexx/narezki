@@ -32,6 +32,7 @@ struct BackendState {
     child: Mutex<Option<Child>>,
     port: Mutex<u16>,
     last_error: Mutex<Option<String>>,
+    data_dir: Mutex<Option<PathBuf>>,
 }
 
 fn find_free_port() -> u16 {
@@ -107,8 +108,8 @@ fn resolve_python_executable(backend_dir: &PathBuf) -> PathBuf {
     }
 }
 
-fn open_backend_log_stdio(backend_dir: &PathBuf) -> (Stdio, Stdio) {
-    let logs_dir = backend_dir.join("data").join("logs");
+fn open_backend_log_stdio(base_data_dir: &PathBuf) -> (Stdio, Stdio) {
+    let logs_dir = base_data_dir.join("logs");
     if fs::create_dir_all(&logs_dir).is_ok() {
         let log_path = logs_dir.join("backend.log");
         if let Ok(out_file) = OpenOptions::new().create(true).append(true).open(&log_path) {
@@ -120,17 +121,26 @@ fn open_backend_log_stdio(backend_dir: &PathBuf) -> (Stdio, Stdio) {
     (Stdio::null(), Stdio::null())
 }
 
-fn spawn_backend_process(port: u16) -> Result<Child, String> {
+fn spawn_backend_process(port: u16, custom_data_dir: Option<&PathBuf>) -> Result<Child, String> {
     let backend_dir =
         resolve_backend_dir().ok_or_else(|| "Could not locate backend/app/main.py".to_string())?;
     let python_exe = resolve_python_executable(&backend_dir);
-    let (stdout_cfg, stderr_cfg) = open_backend_log_stdio(&backend_dir);
+    let effective_data_dir = custom_data_dir
+        .cloned()
+        .unwrap_or_else(|| backend_dir.join("data"));
+    let _ = fs::create_dir_all(&effective_data_dir);
+    let (stdout_cfg, stderr_cfg) = open_backend_log_stdio(&effective_data_dir);
 
     let mut cmd = Command::new(&python_exe);
     cmd.current_dir(&backend_dir)
         .env("PYTHONUTF8", "1")
-        .env("PYTHONIOENCODING", "utf-8")
-        .args([
+        .env("PYTHONIOENCODING", "utf-8");
+
+    if let Some(dir) = custom_data_dir {
+        cmd.env("NAREZKI_DATA_DIR", dir);
+    }
+
+    cmd.args([
             "-m",
             "uvicorn",
             "app.main:app",
@@ -207,8 +217,9 @@ fn restart_backend_internal(state: &BackendState) -> BackendInfo {
     stop_backend_process(state);
     let port = find_free_port();
     *state.port.lock().unwrap() = port;
+    let custom_data_dir = state.data_dir.lock().unwrap().clone();
 
-    match spawn_backend_process(port) {
+    match spawn_backend_process(port, custom_data_dir.as_ref()) {
         Ok(child) => {
             *state.child.lock().unwrap() = Some(child);
             *state.last_error.lock().unwrap() = None;
@@ -287,15 +298,12 @@ fn open_in_explorer(path: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let port = find_free_port();
-    let (initial_child, initial_error) = match spawn_backend_process(port) {
-        Ok(child) => (Some(child), None),
-        Err(err) => (None, Some(err)),
-    };
 
     let backend_state = BackendState {
-        child: Mutex::new(initial_child),
+        child: Mutex::new(None),
         port: Mutex::new(port),
-        last_error: Mutex::new(initial_error),
+        last_error: Mutex::new(None),
+        data_dir: Mutex::new(None),
     };
 
     let app = tauri::Builder::default()
@@ -306,7 +314,25 @@ pub fn run() {
             restart_backend,
             open_in_explorer
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            #[cfg(not(debug_assertions))]
+            let custom_data_dir: Option<PathBuf> = app.path().app_data_dir().ok();
+            #[cfg(debug_assertions)]
+            let custom_data_dir: Option<PathBuf> = None;
+
+            if let Some(state) = app.try_state::<BackendState>() {
+                *state.data_dir.lock().unwrap() = custom_data_dir.clone();
+                match spawn_backend_process(port, custom_data_dir.as_ref()) {
+                    Ok(child) => {
+                        *state.child.lock().unwrap() = Some(child);
+                        *state.last_error.lock().unwrap() = None;
+                    }
+                    Err(err) => {
+                        *state.last_error.lock().unwrap() = Some(err);
+                    }
+                }
+            }
+
             let show_i = MenuItem::with_id(app, "show", "Открыть Narezki", true, None::<&str>)?;
             let restart_i = MenuItem::with_id(
                 app,

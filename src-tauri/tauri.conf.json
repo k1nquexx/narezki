@@ -31,7 +31,8 @@
     "targets": "all",
     "resources": [
       "../backend/app/**/*",
-      "../backend/requirements.txt"
+      "../backend/requirements.txt",
+      "../backend/requirements-cpu.txt"
     ],
     "icon": [
       "icons/icon.png",

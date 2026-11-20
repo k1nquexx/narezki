@@ -67,7 +67,7 @@
 
 ---
 
-### [BUG-23] `CRITICAL` — Сломанная production-сборка Tauri: отсутствует `requirements-cpu.txt` в ресурсах и запись данных в read-only каталог установки
+### [BUG-23] `CRITICAL` `[FIXED]` — Сломанная production-сборка Tauri: отсутствует `requirements-cpu.txt` в ресурсах и запись данных в read-only каталог установки
 - **Файл и строка:** `src-tauri/tauri.conf.json:29-35`, `src-tauri/src/lib.rs:110-121, 129-144`, `backend/requirements.txt:6-8`, `backend/app/core/config.py:14-23`
 - **Суть проблемы:**
   1. `backend/requirements.txt` делегирует зависимости через `-r requirements-cpu.txt`, но в `src-tauri/tauri.conf.json` в `bundle.resources` указан только `"../backend/requirements.txt"` — файл `requirements-cpu.txt` не попадёт в собранный дистрибутив.

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 from ...core.config import BIN_DIR, get_ffmpeg_path
+from ...core.cuda_env import run_cancellable_thread
 
 ProgressCallback = Callable[[float, str], Awaitable[None]]
 
@@ -90,4 +91,4 @@ async def download_video_url(
                     return item, title
             raise FileNotFoundError("yt-dlp завершил работу, но итоговый видеофайл не найден.")
 
-    return await asyncio.to_thread(_run_download)
+    return await run_cancellable_thread(_run_download, cancel_event=cancel_event)

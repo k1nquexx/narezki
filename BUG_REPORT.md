@@ -155,7 +155,7 @@
 
 ---
 
-### [BUG-31] `MAJOR` — Гонка завершения GPU-потоков при `QueueManager.stop()` и удаления проекта при активном `yt-dlp`
+### [BUG-31] `MAJOR` `[FIXED]` — Гонка завершения GPU-потоков при `QueueManager.stop()` и удаления проекта при активном `yt-dlp`
 - **Файл и строка:** `backend/app/core/queue_manager.py:198-211, 382-395`, `backend/app/services/ingest/downloader.py:93`
 - **Суть проблемы:**
   1. При остановке приложения (`QueueManager.stop()`) отменяются и `_active_tasks`, и `_worker_tasks`. В `_execute_job()` блок `except (JobCancelledError, asyncio.CancelledError):` не ожидает завершения `handler_task`, поэтому `stop()` возвращает управление до того, как `run_cancellable_thread()` дождётся кооперативного выхода Whisper/YOLOv8. Следующая строка в `main.py:111` вызывает `release_vram_async("shutdown")` параллельно с активным GPU-потоком.

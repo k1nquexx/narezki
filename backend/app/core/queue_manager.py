@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
@@ -200,12 +201,23 @@ class QueueManager:
         for ctx in list(self._contexts.values()):
             ctx.cancel_event.set()
             ctx.terminate_subprocesses()
-        for task in list(self._active_tasks.values()):
+        active = list(self._active_tasks.values())
+        for task in active:
             task.cancel()
+        if active:
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(*active, return_exceptions=True),
+                    timeout=15.0,
+                )
         for task in self._worker_tasks:
             task.cancel()
         if self._worker_tasks:
-            await asyncio.gather(*self._worker_tasks, return_exceptions=True)
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(*self._worker_tasks, return_exceptions=True),
+                    timeout=10.0,
+                )
         self._worker_tasks.clear()
         self._active_tasks.clear()
         self._contexts.clear()
@@ -358,6 +370,7 @@ class QueueManager:
         )
         self._contexts[job_id] = ctx
 
+        handler_task: Optional[asyncio.Task[dict[str, Any]]] = None
         try:
             handler_task = asyncio.create_task(handler(ctx), name=f"narezki-job-{job_id}")
             self._active_tasks[job_id] = handler_task
@@ -380,7 +393,12 @@ class QueueManager:
                     await ws_manager.emit_job_update(JobOut.model_validate(job).model_dump(mode="json"))
 
         except (JobCancelledError, asyncio.CancelledError):
+            ctx.cancel_event.set()
             ctx.terminate_subprocesses()
+            if handler_task is not None and not handler_task.done():
+                handler_task.cancel()
+                with suppress(Exception, asyncio.CancelledError):
+                    await asyncio.wait_for(handler_task, timeout=15.0)
             async with AsyncSessionLocal() as session:
                 job = await session.get(Job, job_id)
                 if job is not None:

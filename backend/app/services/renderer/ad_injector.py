@@ -108,10 +108,15 @@ def build_video_ad_splice_filtergraph(
     ]
 
     if ad_a_in:
-        lines.append(
-            f"[{ad_a_in}]loudnorm=I=-14:TP=-1.5:LRA=11,"
-            f"aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[_ad_a]"
-        )
+        if ad_dur >= 1.5:
+            lines.append(
+                f"[{ad_a_in}]loudnorm=I=-14:TP=-1.5:LRA=11,"
+                "aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[_ad_a]"
+            )
+        else:
+            lines.append(
+                f"[{ad_a_in}]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[_ad_a]"
+            )
     else:
         lines.append(f"anullsrc=r=48000:cl=stereo:d={ad_dur:.3f},asetpts=PTS-STARTPTS[_ad_a]")
 

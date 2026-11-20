@@ -271,6 +271,7 @@ async def render_clip(
     quality_cq: int = 21,
     target_fps: int = 30,
     fast_preview: bool = False,
+    source_duration: Optional[float] = None,
     on_progress: Optional[ProgressCallback] = None,
     cancel_event: Optional[asyncio.Event] = None,
     register_proc: Optional[Callable[[asyncio.subprocess.Process], None]] = None,
@@ -281,16 +282,38 @@ async def render_clip(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    start_time = max(0.0, float(clip_data["start_time"]))
-    end_time = max(start_time + 0.2, float(clip_data["end_time"]))
-    clip_dur = end_time - start_time
+    raw_start = float(clip_data["start_time"])
+    raw_end = float(clip_data["end_time"])
+    if raw_end <= raw_start:
+        raise ValueError(
+            f"Некорректные таймкоды клипа: end_time ({raw_end:.3f}s) <= start_time ({raw_start:.3f}s)"
+        )
+    start_time = max(0.0, raw_start)
+    end_time = raw_end
 
-    # Ensure source dimensions are valid
-    if source_width <= 0 or source_height <= 0:
-        src_meta = await probe_media(source_path)
-        source_width = int(src_meta.get("width") or 1920)
-        source_height = int(src_meta.get("height") or 1080)
-        source_has_audio = bool(src_meta.get("has_audio", True))
+    # Ensure source dimensions and duration are valid
+    src_dur = float(source_duration or 0.0)
+    if source_width <= 0 or source_height <= 0 or src_dur <= 0.0:
+        src_meta = await probe_media(source_path, require_video=True)
+        if source_width <= 0 or source_height <= 0:
+            source_width = int(src_meta.get("width") or 1920)
+            source_height = int(src_meta.get("height") or 1080)
+            source_has_audio = bool(src_meta.get("has_audio", True))
+        if src_dur <= 0.0:
+            src_dur = float(src_meta.get("duration") or 0.0)
+
+    if src_dur > 0.0:
+        if start_time >= src_dur - 0.1:
+            raise ValueError(
+                f"Начало клипа ({start_time:.2f}s) выходит за длительность исходного видео ({src_dur:.2f}s)"
+            )
+        end_time = min(end_time, src_dur)
+        if end_time <= start_time:
+            raise ValueError(
+                f"Некорректный диапазон клипа ({start_time:.2f}s..{end_time:.2f}s) для видео длительностью {src_dur:.2f}s"
+            )
+
+    clip_dur = end_time - start_time
 
     temp_id = uuid.uuid4().hex[:10]
     ass_path: Optional[Path] = None
@@ -440,11 +463,16 @@ async def render_clip(
             )
             v_cur = "v_ov"
 
-        # 3e. Audio loudness normalization on main segment
-        fg.append(
-            f"[{a_cur}]loudnorm=I=-14:TP=-1.5:LRA=11,"
-            "aformat=sample_rates=48000:channel_layouts=stereo[a_norm]"
-        )
+        # 3e. Audio loudness normalization on main segment (skip loudnorm on short/silent clips to avoid NaN in AAC)
+        if source_has_audio and main_dur >= 1.5:
+            fg.append(
+                f"[{a_cur}]loudnorm=I=-14:TP=-1.5:LRA=11,"
+                "aformat=sample_rates=48000:channel_layouts=stereo[a_norm]"
+            )
+        else:
+            fg.append(
+                f"[{a_cur}]aformat=sample_rates=48000:channel_layouts=stereo[a_norm]"
+            )
         a_cur = "a_norm"
 
         # 3f. Mode 1 Video Ad Insert (mid_roll / outro)
@@ -535,6 +563,9 @@ async def render_clip(
                     unregister_proc=unregister_proc,
                 )
                 if output_path.exists() and output_path.stat().st_size > 0:
+                    out_meta = await probe_media(output_path, require_video=True)
+                    if float(out_meta.get("duration") or 0.0) <= 0.0:
+                        raise RuntimeError("Отрендеренный файл имеет нулевую длительность")
                     return output_path
             except asyncio.CancelledError:
                 raise
